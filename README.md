@@ -148,7 +148,7 @@ Et un arrêt d'urgence : `sudo qaf-pause` dans dom0 fait refuser tout plan et ar
 ### Ce que QAF ne promet pas
 
 - **`sys-agent` a le réseau** (par sys-firewall) : il lit le Web et la documentation. C'est assumé, puisqu'il est déjà traité comme influencé : toute action N2 ou plus te sera demandée.
-- **Tes demandes partent chez le fournisseur du modèle.** Avec Claude Code, ce que tu demandes et ce que l'agent lit passent par l'API d'Anthropic.
+- **Tes demandes partent chez le fournisseur du modèle, sauf si tu choisis une IA locale.** Avec un abonnement ou une clé d'API, ce que tu demandes et ce que l'agent lit passent par les serveurs d'Anthropic (ou d'un autre fournisseur). Tu peux aussi faire tourner un modèle local : Claude Code sait viser un serveur compatible (variable `ANTHROPIC_BASE_URL`, par exemple Ollama ou un relais comme LiteLLM), dans un autre qube ou sur un autre poste à toi, et tes demandes ne quittent plus ta machine. Plus de confidentialité, mais un modèle local est en général moins capable, et ce montage n'est pas encore testé par le projet. C'est ton choix : la sécurité de QAF ne dépend pas du modèle, le Doorman applique les mêmes règles quel qu'il soit.
 - **Suspendre les confirmations est possible**, à ta demande (`qaf-suspendre 15m|1h|1j|permanent`, comme le sudo sans mot de passe d'Omarchy). Pendant la suspension, ce qui serait confirmé passe sans fenêtre, noté au journal ; **N4 reste refusé** et la pause l'emporte. Un fichier de suspension qui n'appartient pas à root, ou modifiable par d'autres, est ignoré.
 - **Aucun audit externe** n'a été fait. Les seules revues de sécurité sont celles du projet.
 
