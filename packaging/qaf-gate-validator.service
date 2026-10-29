@@ -1,0 +1,50 @@
+[Unit]
+Description=QAF Doorman : validateur (parse les plans de sys-agent, sans X ni qubesd)
+Requires=qaf-gate-validator.socket
+After=qaf-gate-validator.socket qaf-gate-executor.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/qaf/qaf-gate-validator
+User=qaf-gate
+Group=qaf-gate
+# Aucun dossier d'état : avec ProtectSystem=strict le validateur n'écrit nulle
+# part. La Pause automatique est posée par l'exécuteur, à sa demande.
+UMask=0077
+
+# Confinement (C4) : ni X, ni sudo, ni qubesd, ni réseau.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# Espace réseau privé : coupe aussi le socket X abstrait (@/tmp/.X11-unix/X0).
+# Les sockets Unix par chemin (talon, exécuteur) restent joignables.
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+InaccessiblePaths=-/tmp/.X11-unix -/run/qubesd.sock -/run/qubesd.internal.sock -/run/qubesd.misc.sock -/run/qubes -/etc/qubes -/etc/sudoers -/etc/sudoers.d
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+MemoryMax=128M
+TasksMax=32
+
+[Install]
+Also=qaf-gate-validator.socket

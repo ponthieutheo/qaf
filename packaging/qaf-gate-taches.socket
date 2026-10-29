@@ -1,0 +1,15 @@
+[Unit]
+Description=QAF Doorman : socket de qaf-gate-taches (réservé à l'exécuteur)
+
+[Socket]
+ListenStream=/run/qaf-taches/taches.sock
+# Seul l'exécuteur (groupe qaf-exec) peut s'y connecter ; taches.py revérifie
+# l'uid du pair (SO_PEERCRED). Le validateur et la session n'y ont pas accès.
+SocketUser=qaf-taches
+SocketGroup=qaf-exec
+SocketMode=0660
+DirectoryMode=0755
+Accept=no
+
+[Install]
+WantedBy=sockets.target

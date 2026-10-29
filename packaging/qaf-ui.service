@@ -1,0 +1,23 @@
+[Unit]
+Description=QAF : fenêtre de confirmation du cœur du système (session graphique)
+# Unité systemd --user (/etc/systemd/user). Lancée à l'ouverture de session par
+# /etc/xdg/autostart/qaf-ui.desktop, qui lui passe DISPLAY et XAUTHORITY, comme
+# qubes-app-menu (qubes-desktop-linux-menu, autostart/qubes-app-menu.desktop).
+# /run/qaf-ui vient de /etc/tmpfiles.d/qaf-ui.conf (utilisateur:qaf-exec, 2750).
+# Sans qaf-ui, l'exécuteur refuse toute action à confirmer (fail-closed).
+ConditionPathIsDirectory=/run/qaf-ui
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/qaf/qaf-ui
+Restart=on-failure
+RestartSec=2
+# Une unité --user ne peut pas tout confiner (pas d'espaces de noms sans
+# PrivateUsers) : on garde ce qui fonctionne sans privilège.
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+RestrictRealtime=yes
+UMask=0077

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Service qrexec qaf.Exec (qaf-hand). Requête JSON bornée sur stdin, réponse JSON sur stdout.
+# L'argument de service éventuel est ignoré. -I : pas de chemin utilisateur ni de PYTHON*.
+exec /usr/bin/python3 -I -m qaf_hand exec

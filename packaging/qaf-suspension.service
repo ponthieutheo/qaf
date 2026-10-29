@@ -1,0 +1,14 @@
+[Unit]
+Description=QAF : icône de suspension des confirmations (barre de Plasma)
+# Unité systemd --user (/etc/systemd/user), lancée à l'ouverture d'une session
+# Plasma par /etc/xdg/autostart/qaf-suspension.desktop, qui lui passe DISPLAY et
+# XAUTHORITY (comme qaf-ui). L'icône lit /var/lib/qaf/suspension sans droits et
+# lance « sudo -n qaf-suspendre … » aux clics : pas de NoNewPrivileges ici.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/qaf-suspension
+Restart=on-failure
+RestartSec=3

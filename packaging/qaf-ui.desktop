@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=QAF : confirmations du cœur du système
+Name[en]=QAF: system core confirmations
+Name[zh_CN]=QAF：系统核心的确认
+Comment=Démarre qaf-ui (systemd --user) avec l'affichage de la session
+Comment[en]=Starts qaf-ui (systemd --user) with the session display
+Comment[zh_CN]=以会话的显示启动 qaf-ui（systemd --user）
+Exec=sh -c "systemctl --user import-environment DISPLAY XAUTHORITY LANG LANGUAGE LC_ALL LC_MESSAGES; systemctl --user restart qaf-ui.service"
+Terminal=false
+StartupNotify=false
+NoDisplay=true
+NotShowIn=X-QUBES

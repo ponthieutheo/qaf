@@ -1,0 +1,969 @@
+#!/bin/bash
+# qaf-installer — transforme un Qubes OS 4.3 fraîchement installé en QAF, en une
+# commande (à lancer par l'utilisateur, dans dom0, en root). Base de la future ISO.
+#
+#   sudo bash qaf/tools/qaf-installer ARCHIVE [EMPREINTE]   installe (ou met à niveau)
+#   sudo bash qaf/tools/qaf-installer --extension=EXT.tar.gz [--empreinte-extension=…] ARCHIVE [EMPREINTE]
+#                                     + extension locale (étapes en plus, voir « extension »)
+#   sudo qaf-installer --retour        retire tout, dans l'ordre inverse ; garde les qubes
+#   sudo qaf-installer --retour --purge  retire aussi les qubes créés (demande confirmation)
+#   sudo qaf-installer --retour --materiel  retire aussi la couche matériel (disques internes)
+#   qaf-installer --verifier           non-régression du Qubes d'origine, lecture seule
+#
+# ARCHIVE : qaf.tar.gz construit par tools/make-dist.sh, déjà copié dans dom0.
+# EMPREINTE : sha256 lu sur une source INDÉPENDANTE (dépôt de référence, autre
+# machine qui a reconstruit l'archive), demandé d'abord s'il manque, comparé
+# comme dans qaf-update (C12). Mode d'emploi : docs/INSTALLATION.md.
+#
+# Trois couches strictement séparées :
+#   produit   : livré à tous (étapes ci-dessous) ;
+#   matériel  : materiel/<fabricant>-<modèle>.sh, choisi d'après le DMI
+#               (/sys/class/dmi/id/sys_vendor et product_name) ; machine inconnue
+#               = aucun profil ;
+#   extension : archive à part (sa propre empreinte), JAMAIS installée sans
+#               --extension=… explicite, jamais dans l'archive du produit ; elle
+#               déclare ses étapes dans qaf/<nom>/extension.conf (lire_extension).
+#
+# Étapes du produit, dans l'ordre (chacune rejouable : relancer la commande
+# après un échec reprend sans dommage) :
+#   /etc/qaf/portier.json (en premier : install.sh y lit agent_long pour poser
+#   la politique de l'agent permanent) ; portier (packaging/install.sh) ;
+#   tpl-agent et sys-agent (l'agent permanent, docs/AGENT-JETABLE.md D28) ;
+#   qaf-agent-dvm (modèle des agents jetables, inactif avec l'agent permanent) ;
+#   tpl-qaf-hand et qaf-dvm ; qaf_hand dans les modèles d'origine (D16) ; réglages
+#   de sécurité (jetable par défaut, devices_denied, 25-qaf-fichiers.policy,
+#   réglages des qubes) ; puis, si le profil matériel en a une, la couche
+#   matériel (Legion : disques internes masqués).
+#   La session Xfce reste celle de Qubes. Le bureau de QAF est le KDE Plasma
+#   (X11) classique, paquet officiel de Qubes kde-settings-qubes installé par
+#   l'utilisateur (jamais par QAF) : QAF n'ajoute aucune session.
+#   --retour garde la couche matériel (le SSD Windows n'est jamais réexposé par
+#   surprise) ; seul --retour --materiel la retire, et --purge ne l'implique pas.
+# Une étape qui échoue arrête tout. Journal : /var/log/qaf-installer.log.
+# Étapes faites et sauvegardes : /var/lib/qaf-installer ; copie de l'archive
+# vérifiée : /usr/lib/qaf-installer (sert à --retour).
+#
+# QAF_RACINE=/chemin : installation d'essai dans un dossier, hors de dom0. Les
+# fichiers de l'installateur et le Doorman (install.sh) vont dans le dossier ;
+# les scripts qui parlent à qubesd ou à la session ne sont pas lancés, mais
+# passés à QAF_ESSAI_LANCEUR (par défaut : seulement affichés).
+# Les fonctions e_/r_ sont appelées par leur nom calculé (etape).
+# shellcheck disable=SC2329
+set -euo pipefail
+umask 022
+
+R=${QAF_RACINE:-}
+ICI=$(cd "$(dirname "$0")/.." && pwd)
+JOURNAL=$R/var/log/qaf-installer.log
+ETAT=$R/var/lib/qaf-installer
+LIB=$R/usr/lib/qaf-installer
+LANCEUR=$R/usr/bin/qaf-installer
+PORTIER=$R/etc/qaf/portier.json
+BASE=debian-13-xfce
+MAX=$((20 * 1024 * 1024))
+PLACE_MIN_GO=${QAF_PLACE_MIN_GO:-20}     # pool des qubes ; 0 = pas de contrôle
+DOM0_MIN_MO=${QAF_DOM0_MIN_MO:-2048}     # disque de dom0
+PRODUIT="portier-json portier sys-agent agent-dvm qaf-dvm qaf-hand-modeles securite bureau"
+CREES="qaf-agent-dvm qaf-dvm tpl-qaf-hand sys-agent tpl-agent"   # ordre de suppression (--purge)
+MODELE_AGENT=qaf-agent-dvm
+# Fichier trié avant 00-qaf.policy qui pourrait concerner l'agent (= install.sh).
+MOTIF_AVANT='sys-agent|qaf-agent|disp[0-9]|@anyvm|@dispvm|@tag:|@type:|^[[:space:]]*!include'
+
+MODE=installer EXT=0 PURGE=0 MATERIEL=0 ARCHIVE="" ATTENDU="" EXT_ARCHIVE="" ATTENDU_EXT=""
+usage() {
+    sed -n '4,11p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+}
+for a in "$@"; do
+    case "$a" in
+        --extension=?*) EXT=1; EXT_ARCHIVE=${a#--extension=} ;;
+        --empreinte-extension=*) ATTENDU_EXT=${a#--empreinte-extension=} ;;
+        --extension) echo "--extension demande son archive : --extension=EXT.tar.gz (docs/INSTALLATION.md)." >&2; exit 2 ;;
+        --retour) MODE=retour ;;
+        --purge) PURGE=1 ;;
+        --materiel) MATERIEL=1 ;;
+        --verifier) MODE=verifier ;;
+        -h|--aide|--help) usage ;;
+        -*) echo "Option inconnue : $a" >&2; usage ;;
+        *) if [ -z "$ARCHIVE" ]; then ARCHIVE=$a
+           elif [ -z "$ATTENDU" ]; then ATTENDU=$a
+           else usage; fi ;;
+    esac
+done
+[ "$PURGE" = 1 ] && [ "$MODE" != retour ] && { echo "--purge va avec --retour." >&2; exit 2; }
+[ "$MATERIEL" = 1 ] && [ "$MODE" != retour ] && { echo "--materiel va avec --retour." >&2; exit 2; }
+[ "$EXT" = 1 ] && [ "$MODE" != installer ] && { echo "--extension va avec l'installation seulement." >&2; exit 2; }
+[ "$MODE" = installer ] && [ -z "$ARCHIVE" ] && usage
+[ "$MODE" != installer ] && [ -n "$ARCHIVE" ] && usage
+
+dire() { printf '%s\n' "$*"; }
+essai() { [ -n "$R" ]; }
+existe() { command -v "$1" >/dev/null 2>&1; }
+A_EFFACER=""  # dossier temporaire à effacer même en cas d'échec (essai d'une extension)
+echec() {  # echec MESSAGE… : arrêt propre, message en français
+    [ -z "$A_EFFACER" ] || rm -rf "$A_EFFACER"
+    printf '\nÉCHEC : %s\n' "$1" >&2
+    shift
+    for l in "$@"; do printf '  %s\n' "$l" >&2; done
+    printf '  Journal complet : %s\n' "$JOURNAL" >&2
+    exit 1
+}
+
+# ---------------------------------------------------------------- utilisateur
+# Utilisateur de la session graphique de dom0 (comme install.sh) : les scripts
+# de profil/ et de l'extension tournent dans sa session, avec « sudo -n » pour le reste.
+UTIL=${QAF_UTILISATEUR:-${SUDO_USER:-}}
+if [ -z "$UTIL" ] || [ "$UTIL" = root ]; then
+    UTIL=$( (getent group qubes || true) | cut -d: -f4 | cut -d, -f1)
+fi
+essai && UTIL=${UTIL:-utilisateur-essai}
+
+lancer() {  # lancer root|session SCRIPT ARGS… ; puis contrôle du profil matériel
+    lancer_script "$@"
+    garde_apres "${2#"$SRC"/}"
+}
+lancer_script() {
+    local qui=$1
+    shift
+    if essai; then
+        dire "   [essai] $qui : ${1#"$SRC"/} ${*:2}"
+        "${QAF_ESSAI_LANCEUR:-true}" "$qui" "$@"
+        return
+    fi
+    if [ "$qui" = root ]; then
+        (cd / && bash "$@")
+        return
+    fi
+    local uid home
+    uid=$(id -u "$UTIL")
+    home=$(getent passwd "$UTIL" | cut -d: -f6)
+    local env_x=(HOME="$home" USER="$UTIL" DISPLAY="${DISPLAY:-:0}" XDG_RUNTIME_DIR="/run/user/$uid"
+                 DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus")
+    [ -f "$home/.Xauthority" ] && env_x+=(XAUTHORITY="$home/.Xauthority")
+    (cd / && runuser -u "$UTIL" -- env "${env_x[@]}" bash "$@")
+}
+
+# ------------------------------------------------------------------ matériel
+MATERIEL_FICHIER="" MATERIEL_NOM="" MATERIEL_NE_JAMAIS_DEMARRER=""
+dmi() {  # dmi CHAMP : valeur DMI en minuscules, réduite à [a-z0-9-]
+    tr -d '\0' < "$R/sys/class/dmi/id/$1" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' \
+        | sed 's/^-*//; s/-*$//' || true
+}
+detecter_materiel() {  # detecter_materiel DÉPÔT
+    local v p f
+    v=$(dmi sys_vendor)
+    p=$(dmi product_name)
+    [ -n "$v" ] && [ -n "$p" ] || return 0
+    f="$1/materiel/$v-$p.sh"
+    [ -f "$f" ] || return 0
+    # shellcheck source=/dev/null
+    . "$f"
+    MATERIEL_FICHIER=$f
+    for q in $MATERIEL_NE_JAMAIS_DEMARRER; do
+        [[ "$q" =~ ^[a-zA-Z][a-zA-Z0-9_.-]{0,30}$ ]] || echec "Profil matériel $f : nom de qube invalide « $q »."
+    done
+}
+EN_MARCHE_AVANT=""
+garde_avant() {
+    EN_MARCHE_AVANT=""
+    for q in $MATERIEL_NE_JAMAIS_DEMARRER; do
+        qvm-check --quiet --running "$q" 2>/dev/null && EN_MARCHE_AVANT="$EN_MARCHE_AVANT $q"
+    done
+    return 0
+}
+garde_apres() {  # garde_apres ÉTAPE : un qube « jamais démarré » ne doit pas avoir démarré
+    for q in $MATERIEL_NE_JAMAIS_DEMARRER; do
+        case " $EN_MARCHE_AVANT " in *" $q "*) continue ;; esac
+        if qvm-check --quiet --running "$q" 2>/dev/null; then
+            echec "« $q » a démarré pendant l'étape « $1 »." \
+                "Sur cette machine ($MATERIEL_NOM), il ne doit jamais démarrer (profil matériel)." \
+                "L'installation s'arrête là. Rien n'a été fait sur $q par l'installateur."
+        fi
+    done
+}
+
+# ---------------------------------------------------------------- extension
+# Une extension (archive à part, --extension=…) ajoute des étapes au produit sans
+# que le produit les connaisse. Elle tient dans un seul dossier qaf/<nom>/ et se
+# déclare dans qaf/<nom>/extension.conf, une ligne par déclaration (# = commentaire) :
+#   etape NOM root|session SCRIPT TITRE…  posée après le produit ; retrait : SCRIPT --retour
+#   admin QUBE                            ajouté à admin_qubes de portier.json (avec --extension)
+#   avertissement TEXTE…                  affiché dans le plan, avant toute étape
+#   signal FICHIER TEXTE…                 --verifier : TEXTE si FICHIER (absolu) existe ; une
+#                                         politique (.policy) est aussi relue par qubes-policy-lint
+# Ses scripts sont à côté d'extension.conf. Gardée dans $LIB/extension pour --retour.
+EXT_DOSSIER="" EXT_ETAPES="" EXT_ADMIN="" EXT_AVERTIR=() EXT_SIGNAUX=()
+declare -A EXT_QUI=() EXT_SCRIPT=() EXT_TITRE=()
+lire_extension() {  # lire_extension DOSSIER_EXTRAIT : charge son extension.conf (refus si mal formé)
+    local confs=("$1"/qaf/*/extension.conf) ligne cle reste nom qui script titre n=0
+    [ "${#confs[@]}" = 1 ] && [ -f "${confs[0]}" ] || \
+        echec "Extension $1 : il faut un seul qaf/<nom>/extension.conf." "Rien n'a été installé ni retiré."
+    EXT_DOSSIER=$(dirname "${confs[0]}") EXT_ETAPES="" EXT_ADMIN="" EXT_AVERTIR=() EXT_SIGNAUX=()
+    EXT_QUI=() EXT_SCRIPT=() EXT_TITRE=()
+    while IFS= read -r ligne || [ -n "$ligne" ]; do
+        n=$((n + 1))
+        read -r cle reste <<< "$ligne"
+        case "$cle" in
+            ''|'#'*) ;;
+            etape)
+                read -r nom qui script titre <<< "$reste"
+                if ! [[ "$nom" =~ ^[a-z][a-z0-9-]{0,40}$ ]] || [ -z "$titre" ] || etape_produit "$nom" \
+                        || [ -n "${EXT_QUI[$nom]:-}" ] || ! [[ "$qui" =~ ^(root|session)$ ]] \
+                        || ! [[ "$script" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || [ ! -f "$EXT_DOSSIER/$script" ]; then
+                    echec "${confs[0]}:$n : étape invalide : $ligne"
+                fi
+                EXT_ETAPES="$EXT_ETAPES $nom" EXT_QUI[$nom]=$qui EXT_SCRIPT[$nom]=$script EXT_TITRE[$nom]=$titre ;;
+            admin)
+                [[ "$reste" =~ ^[a-zA-Z][a-zA-Z0-9_.-]{0,30}$ ]] || echec "${confs[0]}:$n : nom de qube invalide : $ligne"
+                EXT_ADMIN="$EXT_ADMIN $reste" ;;
+            avertissement) EXT_AVERTIR+=("$reste") ;;
+            signal)
+                [[ "$reste" =~ ^/[A-Za-z0-9_./-]+[[:space:]]+[^[:space:]] && "$reste" != *..* ]] || \
+                    echec "${confs[0]}:$n : signal invalide : $ligne"
+                EXT_SIGNAUX+=("$reste") ;;
+            *) echec "${confs[0]}:$n : déclaration inconnue : $ligne" ;;
+        esac
+    done < "${confs[0]}"
+}
+charger_extension() { if [ -d "$LIB/extension" ]; then lire_extension "$LIB/extension"; fi; }
+# Étape du produit (fonctions e_/r_ ci-dessous).
+etape_produit() { declare -F "r_${1//-/_}" >/dev/null; }
+etapes_inconnues() {  # etapes_inconnues FICHIER… : étapes notées que ni le produit ni l'extension chargée ne connaissent
+    local e
+    for e in $(cat "$@" 2>/dev/null || true); do
+        etape_produit "$e" || [ -n "${EXT_QUI[$e]:-}" ] || echo "$e"
+    done
+}
+etapes_extension() { local e; for e in $(cat "$ETAT/etapes" 2>/dev/null || true); do etape_produit "$e" || echo "$e"; done; }
+
+# ---------------------------------------------------------------- état
+fait() { grep -qx "$1" "$ETAT/etapes" 2>/dev/null || echo "$1" >> "$ETAT/etapes"; }
+defait() {
+    [ -f "$ETAT/etapes" ] || return 0
+    grep -vx "$1" "$ETAT/etapes" > "$ETAT/etapes.tmp" || true
+    mv "$ETAT/etapes.tmp" "$ETAT/etapes"
+}
+noter_crees() {  # qubes absents avant l'étape : retirés par --purge seulement
+    for q in "$@"; do
+        qvm-check --quiet "$q" 2>/dev/null && continue
+        grep -qx "$q" "$ETAT/qubes-crees" 2>/dev/null || echo "$q" >> "$ETAT/qubes-crees"
+    done
+}
+
+# ---------------------------------------------------------------- étapes
+# e_X installe, r_X retire. Chaque fonction tourne dans un sous-shell set -e.
+e_portier() { QAF_UTILISATEUR=$UTIL bash "$SRC/packaging/install.sh"; }
+r_portier() {
+    if [ "$PURGE" = 1 ]; then bash "$SRC/packaging/uninstall.sh" --purge
+    else bash "$SRC/packaging/uninstall.sh"; fi
+}
+e_sys_agent() { noter_crees tpl-agent sys-agent; lancer root "$SRC/tools/setup-sys-agent.sh" "$ATTENDU"; }
+r_sys_agent() { dire "   tpl-agent et sys-agent gardés (--purge pour les supprimer)."; }
+e_agent_dvm() { noter_crees "$MODELE_AGENT"; lancer root "$SRC/tools/setup-agent-dvm.sh"; }
+r_agent_dvm() { dire "   $MODELE_AGENT gardé (--purge pour le supprimer)."; }
+e_qaf_dvm() { noter_crees tpl-qaf-hand qaf-dvm; lancer root "$SRC/tools/setup-qaf-dvm.sh" "$ATTENDU"; }
+r_qaf_dvm() { dire "   tpl-qaf-hand et qaf-dvm gardés (--purge pour les supprimer)."; }
+
+modeles_hand() {  # modèles d'origine Debian et Fedora (D16) ; ni Whonix ni ceux de QAF
+    # shellcheck disable=SC2086
+    if [ -n "${QAF_MODELES_HAND+x}" ]; then printf '%s\n' $QAF_MODELES_HAND; return; fi
+    local t
+    for t in $(qvm-ls --raw-data --fields NAME,CLASS | awk -F'|' '$2=="TemplateVM"{print $1}'); do
+        case "$t" in tpl-qaf-hand) continue ;; debian-*|fedora-*) echo "$t"; continue ;; esac
+        # Modèle cloné d'un modèle qui avait déjà la main (qaf_hand) : il la porte aussi, il suit donc.
+        if [ -n "$(qvm-features "$t" supported-rpc.qaf.Task 2>/dev/null || true)" ]; then
+            echo "$t"
+        fi
+    done
+}
+e_qaf_hand_modeles() {
+    local m
+    m=$(modeles_hand | sort -u)
+    [ -n "$m" ] || { dire "   Aucun modèle Debian ou Fedora : rien à faire."; return 0; }
+    # Liste gardée pour --retour (réunion avec les fois précédentes).
+    { cat "$ETAT/modeles-qaf-hand" 2>/dev/null || true; printf '%s\n' "$m"; } | sort -u > "$ETAT/modeles-qaf-hand.tmp"
+    mv "$ETAT/modeles-qaf-hand.tmp" "$ETAT/modeles-qaf-hand"
+    # shellcheck disable=SC2086
+    lancer root "$SRC/tools/install-qaf-hand-modeles.sh" "$ATTENDU" $m
+}
+r_qaf_hand_modeles() {
+    local m="" x
+    for x in $(cat "$ETAT/modeles-qaf-hand" 2>/dev/null || true); do
+        [ "$(qvm-prefs "$x" klass 2>/dev/null)" = TemplateVM ] && m="$m $x"
+    done
+    [ -n "$m" ] || { dire "   Aucun modèle à remettre."; return 0; }
+    # shellcheck disable=SC2086
+    lancer root "$SRC/tools/install-qaf-hand-modeles.sh" --retour $m
+    rm -f "$ETAT/modeles-qaf-hand"
+}
+
+SECURITE="jetable-defaut peripheriques politique-fichiers securite-qubes"
+e_securite() { for s in $SECURITE; do lancer session "$SRC/profil/$s.sh"; done; }
+r_securite() {
+    local s
+    # shellcheck disable=SC2086
+    for s in $(printf '%s\n' $SECURITE | tac); do lancer session "$SRC/profil/$s.sh" --retour; done
+}
+
+# Bureau : Plasma (X11) SEUL à l'écran de connexion (28/10). Aucun
+# fichier de Qubes ni de KDE touché : un drop-in LightDM pointe la liste des
+# sessions vers notre dossier, qui ne contient qu'un lien vers plasmax11.desktop
+# (Xfce et Plasma Wayland, que le démon d'affichage de Qubes ne prend pas,
+# restent installés mais ne sont plus proposés). Sans Plasma : rien n'est posé.
+BUREAU_LIGHTDM=$R/etc/lightdm/lightdm.conf.d/50-qaf-plasma-seul.conf
+BUREAU_SESSIONS=$R/usr/share/qaf/xsessions
+e_bureau() {
+    if [ ! -f "$R/usr/share/xsessions/plasmax11.desktop" ]; then
+        dire "   Plasma (X11) absent : écran de connexion inchangé (sudo qubes-dom0-update kde-settings-qubes)."
+        return 0
+    fi
+    install -d -m 0755 "$BUREAU_SESSIONS" "$(dirname "$BUREAU_LIGHTDM")"
+    ln -sfn /usr/share/xsessions/plasmax11.desktop "$BUREAU_SESSIONS/plasmax11.desktop"
+    cat > "$BUREAU_LIGHTDM" <<'CONF'
+# QAF : seule la session Plasma (X11) est proposée (retrait : qaf-installer --retour).
+[LightDM]
+sessions-directory=/usr/share/qaf/xsessions
+
+[Seat:*]
+user-session=plasmax11
+CONF
+    chmod 0644 "$BUREAU_LIGHTDM"
+    dire "   Écran de connexion : Plasma (X11) seulement (pris en compte à la prochaine connexion)."
+}
+r_bureau() {
+    rm -f "$BUREAU_LIGHTDM" "$BUREAU_SESSIONS/plasmax11.desktop"
+    rmdir "$BUREAU_SESSIONS" 2>/dev/null || true
+    dire "   Écran de connexion : toutes les sessions installées de nouveau proposées."
+}
+
+# « xfce-origine » : étape notée par une installation ancienne (Xfce remis d'origine,
+# plus rien à faire). Son retrait ne fait rien ; elle reste connue pour que --retour
+# et une mise à jour de ces installations ne la prennent pas pour une extension.
+r_xfce_origine() { dire "   Rien à retirer : Xfce reste celui de Qubes."; }
+
+# portier.json : réglage de l'utilisateur. On n'écrase rien : les listes et
+# réglages déjà présents sont gardés tels quels, on y ajoute seulement ce
+# qu'exigent le matériel (ne_jamais_demarrer) et l'extension (admin_qubes, ses
+# lignes « admin ») ; une clé absente prend la valeur du produit (packaging/portier.json).
+e_portier_json() {
+    local admin=""
+    [ "$EXT" = 1 ] && admin=$EXT_ADMIN
+    install -d -m 0755 "$(dirname "$PORTIER")"
+    python3 - "$PORTIER" "$SRC/packaging/portier.json" "$MATERIEL_NE_JAMAIS_DEMARRER" "$admin" <<'PY'
+import json, os, sys
+dest, produit, njd, admin = sys.argv[1:5]
+CLES = ("coffres", "jetables", "systeme", "admin_qubes", "ne_jamais_demarrer", "coffres_entrables")
+AGENT = ("agent_long", "agents_max", "agent_inactivite", "agent_duree_max", "agent_hotes")  # AGENT-JETABLE
+def lire(p):
+    if not os.path.exists(p):
+        return {}
+    with open(p, encoding="utf-8") as f:
+        d = json.load(f)
+    if not isinstance(d, dict) or not set(d) <= set(CLES + AGENT) or not all(isinstance(d[k], list) for k in CLES if k in d):
+        sys.exit(f"{p} : configuration inattendue (clé inconnue ou valeur qui n'est pas une liste) ; rien n'est changé")
+    return d
+actuel, base = lire(dest), lire(produit)
+ajouts = {"ne_jamais_demarrer": njd.split(), "admin_qubes": admin.split()}
+sortie = {}
+for k in CLES:
+    vals = list(actuel[k]) if k in actuel else list(base.get(k, []))
+    vals += [v for v in ajouts.get(k, []) if v not in vals]
+    sortie[k] = vals
+for k in AGENT:
+    if k in actuel or k in base:
+        sortie[k] = actuel.get(k, base.get(k))
+if "qaf-agent-dvm" in sortie["jetables"]:  # R-3 : jamais un modèle de dispvm.create
+    sys.exit(f"{dest} : qaf-agent-dvm est dans « jetables » (interdit, AGENT-JETABLE R-3) ; rien n'est changé")
+with open(dest + ".tmp", "w", encoding="utf-8") as f:
+    json.dump(sortie, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+os.chmod(dest + ".tmp", 0o644)
+os.replace(dest + ".tmp", dest)
+print("   portier.json :", json.dumps(sortie, ensure_ascii=False))
+PY
+}
+r_portier_json() {
+    if [ -f "$ETAT/sauve/portier.json" ]; then
+        install -m 0644 "$ETAT/sauve/portier.json" "$PORTIER"
+        dire "   portier.json d'origine remis."
+    elif [ -f "$ETAT/sauve/portier.json.absent" ]; then
+        rm -f "$PORTIER"
+        dire "   portier.json retiré (absent avant l'installation)."
+    fi
+}
+
+# Couche matériel (profil du DMI) : masquage des disques internes. Retirée
+# seulement par --retour --materiel ; son état est noté dans $ETAT/materiel.
+e_materiel() {
+    materiel_appliquer "$R"
+    printf 'profil=%s\ndate=%s\norigine=aucune règle (%s absent avant QAF)\n' "$(basename "$MATERIEL_FICHIER" .sh)" \
+        "$(date '+%F %T')" "/etc/udev/rules.d/90-qaf-disque-interne.rules" > "$ETAT/materiel"
+}
+r_materiel() {
+    [ "$MATERIEL" = 1 ] && return 0  # retiré après les autres étapes (retirer_materiel)
+    dire "   Profil matériel gardé : disques internes toujours masqués (retrait : sudo bash qaf/tools/qaf-installer --retour --materiel,"
+    dire "   depuis l'archive extraite : la commande qaf-installer est retirée par --retour)."
+}
+retirer_materiel() {
+    [ -f "$ETAT/materiel" ] || return 0
+    if ! declare -F materiel_retirer >/dev/null; then
+        echec "Couche matériel notée ($ETAT/materiel) mais aucun profil matériel pour cette machine." \
+            "Rien n'a été retiré de la couche matériel."
+    fi
+    dire ""
+    dire "== Couche matériel : retrait demandé (--materiel)"
+    dire "   ATTENTION : les disques internes, dont le disque Windows, redeviendront attachables à un qube."
+    materiel_retirer "$R"
+    rm -f "$ETAT/materiel"
+}
+
+faire() {  # faire e|r NOM : étape du produit (fonction e_/r_), sinon de l'extension chargée
+    local f="${1}_${2//-/_}"
+    if declare -F "$f" >/dev/null; then "$f"; return; fi
+    [ -n "${EXT_SCRIPT[$2]:-}" ] || { echo "Étape « $2 » inconnue (ni du produit ni de l'extension)." >&2; return 9; }
+    if [ "$1" = e ]; then lancer "${EXT_QUI[$2]}" "$EXT_DOSSIER/${EXT_SCRIPT[$2]}"
+    else lancer "${EXT_QUI[$2]}" "$EXT_DOSSIER/${EXT_SCRIPT[$2]}" --retour; fi
+}
+
+titre() {
+    case "$1" in
+        portier) echo "Doorman (packaging/install.sh)" ;;
+        sys-agent) echo "Modèle tpl-agent et qube sys-agent" ;;
+        agent-dvm) echo "Modèle des agents jetables $MODELE_AGENT" ;;
+        materiel) echo "Couche matériel : disques internes masqués ($MATERIEL_NOM)" ;;
+        qaf-dvm) echo "Modèle tpl-qaf-hand et jetable qaf-dvm" ;;
+        qaf-hand-modeles) echo "qaf_hand dans les modèles d'origine (D16)" ;;
+        securite) echo "Réglages de sécurité (jetable par défaut, devices_denied, 25-qaf-fichiers.policy, réglages des qubes)" ;;
+        portier-json) echo "Configuration du Doorman (/etc/qaf/portier.json)" ;;
+        bureau) echo "Bureau : Plasma (X11) seule session à l'écran de connexion" ;;
+        *) echo "${EXT_TITRE[$1]:-$1}" ;;
+    esac
+}
+conseil() {  # piste selon l'étape qui a échoué
+    [ "${EXT_QUI[$1]:-}" = session ] && set -- session
+    case "$1" in
+        sys-agent|agent-dvm|qaf-dvm|qaf-hand-modeles)
+            echo "Souvent : pas d'accès aux mises à jour pour les modèles (sys-net, sys-firewall arrêtés ou sans réseau). Vérifie le réseau, puis relance." ;;
+        session)
+            echo "Souvent : session graphique fermée. Ouvre ta session, puis relance." ;;
+        securite)
+            echo "Les réglages déjà posés ont leur sauvegarde dans /var/lib/qaf-profil. Relance après correction." ;;
+        *) echo "Lis les lignes au-dessus pour la cause, corrige, puis relance la même commande." ;;
+    esac
+}
+
+N=0 TOTAL=0
+etape() {  # etape SENS NOM : SENS = e (installer) ou r (retirer)
+    local sens=$1 nom=$2 rc
+    N=$((N + 1))
+    dire ""
+    dire "== [$N/$TOTAL] $(titre "$nom")$([ "$sens" = r ] && echo " : retrait") ($(date '+%F %T'))"
+    garde_avant
+    set +e
+    # 9>&- : le verrou reste au seul qaf-installer. Sinon un démon de la session
+    # relancé par une étape (xfdesktop, xfce4-notifyd…) hérite du descripteur et
+    # garde le verrou après la fin : « Un autre qaf-installer tourne déjà » à
+    # vie (vu sur une vraie machine le 25/10).
+    ( set -e; faire "$sens" "$nom" ) 9>&-
+    rc=$?
+    set -e
+    if [ "$rc" != 0 ]; then
+        if [ "$sens" = e ]; then
+            echec "étape « $(titre "$nom") » (code $rc)." \
+                "L'installation s'est arrêtée là : les étapes suivantes n'ont pas été faites." \
+                "$(conseil "$nom")" \
+                "Les étapes déjà faites restent en place. Relancer la même commande reprend sans dommage ;" \
+                "pour tout retirer : sudo qaf-installer --retour"
+        else
+            echec "retrait de « $(titre "$nom") » (code $rc)." \
+                "Le retrait s'est arrêté là ; les étapes pas encore retirées restent notées dans $ETAT/etapes." \
+                "Corrige la cause (lignes au-dessus), puis relance : sudo qaf-installer --retour"
+        fi
+    fi
+    garde_apres "$nom"
+    if [ "$sens" = e ]; then fait "$nom"; else defait "$nom"; fi
+}
+
+# ---------------------------------------------------------------- vérifier
+verifier() {
+    local ecart=0 f n sortie
+    ok() { dire "  OK       $*"; }
+    ko() { dire "  ÉCHEC    $*"; ecart=1; }
+    nv() { dire "  non vérifié : $*"; }
+    dire "== Non-régression du Qubes d'origine (lecture seule)"
+    if existe qvm-ls; then
+        if sortie=$(qvm-ls --raw-list 2>&1) && grep -qx dom0 <<< "$sortie"; then
+            ok "qvm-ls répond ($(printf '%s\n' "$sortie" | grep -c .) qubes)"
+        else ko "qvm-ls ne répond pas normalement : $(printf '%s' "$sortie" | tail -n 1)"; fi
+    else nv "qvm-ls absent"; fi
+    if existe systemctl && ! essai; then
+        if systemctl is-active --quiet qubesd; then ok "qubesd actif"; else ko "qubesd n'est pas actif"; fi
+    fi
+    # Les services qrexec de dom0 (lancés par qrexec-daemon, enfant de qubesd)
+    # journalisent sous l'unité qubesd : un « sudo » qui demande un mot de
+    # passe y apparaît sans être une erreur de qubesd. Ces lignes sont écartées.
+    erreurs_qubesd() { journalctl -u qubesd -p err -b -q --no-pager 2>/dev/null | grep -Ev ' sudo\[[0-9]+\]: ' || true; }
+    if existe journalctl && ! essai; then
+        n=$(erreurs_qubesd | grep -c . || true)
+        if [ "$n" = 0 ]; then ok "journal de qubesd : aucune erreur depuis le démarrage"
+        else
+            ko "journal de qubesd : $n ligne(s) d'erreur depuis le démarrage (à lire, pas forcément dues à QAF) :"
+            erreurs_qubesd | tail -n 5 | sed 's/^/             /'
+        fi
+    else nv "journal de qubesd (journalctl absent ou essai)"; fi
+    charger_extension
+    local signal politiques="/etc/qubes/policy.d/00-qaf.policy /etc/qubes/policy.d/25-qaf-fichiers.policy"
+    for signal in "${EXT_SIGNAUX[@]}"; do
+        case "${signal%%[[:space:]]*}" in *.policy) politiques="$politiques ${signal%%[[:space:]]*}" ;; esac
+    done
+    for f in $politiques; do
+        [ -f "$R$f" ] || continue
+        if ! existe qubes-policy-lint; then nv "lint de $(basename "$f") (qubes-policy-lint absent)"; continue; fi
+        if qubes-policy-lint "$R$f" >/dev/null 2>&1; then ok "politique $(basename "$f") valide"
+        else ko "politique $(basename "$f") refusée par qubes-policy-lint"; fi
+    done
+    for signal in "${EXT_SIGNAUX[@]}"; do  # extension : ce qu'elle a ouvert, rappelé à chaque vérification
+        read -r f n <<< "$signal"
+        [ -f "$R$f" ] && dire "  $n"
+    done
+    if existe rpm && [ -f "$R/etc/qubes/policy.d/90-default.policy" ]; then
+        # /run et /var/run sont recréés à chaque démarrage (mode différent du
+        # paquet sans que rien n'ait été modifié) : écartés.
+        # Le dossier policy.d est au paquet qrexec, 90-default.policy à qubes-core-dom0 :
+        # les deux paquets sont vérifiés (parcours 4 : mode du dossier changé sans alerte).
+        sortie=$(rpm -Vf "$R/etc/qubes/policy.d/90-default.policy" "$R/etc/qubes/policy.d" 2>&1             | grep -Ev '[[:space:]](/var)?/run(/|$)' || true)
+        if [ -z "$sortie" ]; then
+            ok "fichiers du paquet de politique de Qubes intacts (rpm -V)"
+        else ko "fichiers de politique de Qubes modifiés : $(printf '%s' "$sortie" | tr '\n' ' ')"; fi
+    else nv "intégrité des politiques de Qubes (rpm absent)"; fi
+    if [ -f "$R/etc/qubes/policy.d/00-qaf.policy" ]; then
+        if existe systemctl && ! essai; then
+            local u inactifs=""
+            for u in qaf-gate-validator qaf-gate-executor qaf-gate-demande qaf-gate-taches qaf-gate-outils; do
+                systemctl is-active --quiet "$u.socket" || inactifs="$inactifs $u.socket"
+            done
+            if [ -z "$inactifs" ]; then ok "Doorman : sockets actifs"; else ko "Doorman : sockets inactifs :$inactifs"; fi
+        fi
+        if existe qaf-pause; then dire "  Doorman  $(qaf-pause status 2>&1 | head -n 1)"; fi
+    else
+        dire "  Doorman  absent (normal avant l'installation ou après --retour)"
+    fi
+    verifier_agent
+    verifier_bureau
+    if [ -f "$PORTIER" ] && existe python3; then
+        for q in $(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("ne_jamais_demarrer", [])))' "$PORTIER" 2>/dev/null || true); do
+            if qvm-check --quiet --running "$q" 2>/dev/null; then ko "$q est démarré (ne_jamais_demarrer)"
+            else ok "$q arrêté (ne_jamais_demarrer)"; fi
+        done
+    fi
+    if [ -f "$ETAT/materiel" ]; then
+        detecter_materiel "$ICI"
+        if declare -F materiel_controler >/dev/null; then materiel_controler "$R" || ecart=1; fi
+        if existe qvm-device && ! essai; then
+            if qvm-device block list 2>/dev/null | grep -Eq '^dom0:nvme'; then
+                ko "un disque interne est proposé aux qubes (qvm-device block list)"
+            else ok "aucun disque interne proposé aux qubes"; fi
+        fi
+    fi
+    dire "  À essayer à la main : ouvrir un jetable, copier un fichier entre deux qubes (confirmation"
+    dire "  native de Qubes), ouvrir le Gestionnaire des espaces (Qube Manager)."
+    return "$ecart"
+}
+
+# Bureau de QAF : KDE Plasma (X11), paquet officiel de Qubes kde-settings-qubes,
+# installé par l'utilisateur (jamais par QAF). Simple information, lecture seule : son
+# absence n'est pas un écart (Xfce d'origine reste utilisable).
+verifier_bureau() {
+    if [ -f "$R/usr/share/xsessions/plasmax11.desktop" ]; then
+        dire "  info     session Plasma X11 présente (/usr/share/xsessions/plasmax11.desktop)"
+        if [ -f "$R/etc/lightdm/lightdm.conf.d/50-qaf-plasma-seul.conf" ]; then
+            dire "  info     écran de connexion : Plasma (X11) seul"
+        fi
+    else
+        dire "  info     session Plasma X11 absente : sudo qubes-dom0-update kde-settings-qubes"
+    fi
+}
+
+# Agent jetable (docs/AGENT-JETABLE.md §3, §5.2, R-3), lecture seule.
+verifier_agent() {
+    local d f nom bloque=0 q v
+    for d in "$R/run/qubes/policy.d" "$R/etc/qubes/policy.d"; do
+        [ -d "$d" ] || continue
+        for f in "$d"/*.policy; do
+            [ -f "$f" ] || continue
+            nom=$(basename "$f")
+            if [ "$nom" = 00-qaf-agent-long.policy ] && [ "$d" = "$R/etc/qubes/policy.d" ]; then
+                verifier_agent_long "$f" || bloque=1
+                continue
+            fi
+            if [[ "$nom" < 00-qaf.policy ]] && grep -Ev '^[[:space:]]*(#|$)' "$f" | grep -Eq "$MOTIF_AVANT"; then
+                ko "politique $f triée avant 00-qaf.policy et qui peut concerner l'agent"; bloque=1
+            fi
+        done
+    done
+    [ "$bloque" = 0 ] && [ -f "$R/etc/qubes/policy.d/00-qaf.policy" ] && ok "aucune politique ne passe avant 00-qaf.policy"
+    # Agent permanent (D28) : sa politique posée, et le qube présent.
+    if [ -f "$PORTIER" ] && existe python3 && python3 -c \
+            'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("agent_long") is True else 1)' \
+            "$PORTIER" 2>/dev/null; then
+        if [ -f "$R/etc/qubes/policy.d/00-qaf-agent-long.policy" ]; then ok "agent permanent : politique de sys-agent posée"
+        else ko "portier.json dit agent_long, mais 00-qaf-agent-long.policy est absent (l'agent ne peut rien faire)"; fi
+        if existe qvm-check && ! essai; then
+            if qvm-check --quiet sys-agent 2>/dev/null; then ok "agent permanent : sys-agent présent"
+            else ko "portier.json dit agent_long, mais le qube sys-agent est absent"; fi
+        fi
+    fi
+    if [ -f "$PORTIER" ] && grep -q '"qaf-agent-dvm"' "$PORTIER" && existe python3 && python3 -c \
+            'import json,sys; sys.exit(0 if "qaf-agent-dvm" in json.load(open(sys.argv[1])).get("jetables", []) else 1)' "$PORTIER"; then
+        ko "$MODELE_AGENT est dans « jetables » de portier.json (R-3)"
+    fi
+    existe qvm-prefs && qvm-check --quiet "$MODELE_AGENT" 2>/dev/null || return 0
+    v=$(qubes-prefs default_dispvm 2>/dev/null || true)
+    [ "$v" = "$MODELE_AGENT" ] && ko "$MODELE_AGENT est le jetable par défaut global (R-3)"
+    q=$(qvm-ls --raw-data --fields NAME,DEFAULT_DISPVM 2>/dev/null | awk -F'|' -v m="$MODELE_AGENT" '$2==m{print $1}' | tr '\n' ' ')
+    if [ -n "$q" ]; then ko "$MODELE_AGENT est le jetable par défaut de : $q(R-3)"
+    else ok "$MODELE_AGENT n'est le jetable par défaut d'aucun qube"; fi
+    if existe qvm-tags; then
+        if qvm-tags "$MODELE_AGENT" list 2>/dev/null | grep -qx qaf-agent; then ko "$MODELE_AGENT porte l'étiquette qaf-agent (S-J2)"
+        else ok "$MODELE_AGENT sans étiquette qaf-agent"; fi
+    fi
+    # CreateDisposable rendrait un jetable préchargé, déjà démarré et sans
+    # étiquette (qubes/vm/dispvm.py, from_appvm) : jamais de préchargement ici.
+    if existe qvm-features; then
+        v=$(qvm-features "$MODELE_AGENT" preload-dispvm-max 2>/dev/null || true)
+        if [ -n "$v" ] && [ "$v" != 0 ]; then ko "$MODELE_AGENT a preload-dispvm-max=$v (jetables d'agent préchargés hors du Doorman)"
+        else ok "$MODELE_AGENT sans jetables préchargés"; fi
+    fi
+    # Unicité de l'étiquette : seuls les jetables de qaf-agent-dvm la portent
+    # (qvm-ls --tags : filtre de qubesadmin, absent des faux outils d'essai).
+    essai && return 0
+    q=$(qvm-ls --raw-data --tags qaf-agent --fields NAME,CLASS,TEMPLATE 2>/dev/null         | awk -F'|' -v m="$MODELE_AGENT" '!($2=="DispVM" && $3==m){print $1}' | tr '
+' ' ')
+    if [ -n "$q" ]; then ko "étiquette qaf-agent sur un qube qui n'est pas un jetable de $MODELE_AGENT : $q"
+    else ok "étiquette qaf-agent portée seulement par des jetables de $MODELE_AGENT"; fi
+    nv "contenu du volume privé de $MODELE_AGENT (le lire démarrerait le modèle : contrôlé par setup-agent-dvm.sh)"
+}
+
+# 00-qaf-agent-long.policy : identique à celui du dépôt, et seulement si
+# portier.json dit agent_long (AGENT-JETABLE §11). Lecture seule.
+verifier_agent_long() {
+    local f=$1 ref="" long=1
+    for ref in "$LIB/qaf/policy/00-qaf-agent-long.policy" "$ICI/policy/00-qaf-agent-long.policy"; do
+        [ -f "$ref" ] && break
+    done
+    if [ ! -f "$ref" ] || ! cmp -s "$f" "$ref"; then
+        ko "$f diffère de la politique livrée (ou référence introuvable) : elle passe avant 00-qaf.policy"; return 1
+    fi
+    if existe python3 && [ -f "$PORTIER" ]; then
+        python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("agent_long") is True else 1)'             "$PORTIER" 2>/dev/null && long=0
+    fi
+    if [ "$long" != 0 ]; then ko "$f présent alors que portier.json ne dit pas agent_long"; return 1; fi
+    return 0
+}
+
+if [ "$MODE" = verifier ]; then
+    verifier
+    exit $?
+fi
+
+# ---------------------------------------------------------------- prérequis
+if ! essai; then
+    [ "$(id -u)" = 0 ] || { echo "À lancer en root : sudo $0 $*" >&2; exit 1; }
+fi
+install -d -m 0755 "$(dirname "$JOURNAL")" "$R/run"
+
+EMPREINTE_LUE=""
+verifier_archive() {  # verifier_archive CHEMIN EMPREINTE MOTIF_DES_CHEMINS OBLIGATOIRE…
+    local chemin=$1 attendu motif=$3 taille recu liste o
+    attendu=$(printf '%s' "$2" | tr -d '[:space:]' | tr 'A-F' 'a-f')
+    shift 3
+    grep -Eq '^[0-9a-f]{64}$' <<< "$attendu" || \
+        echec "Empreinte invalide pour $chemin (64 caractères hexadécimaux attendus)." "Rien n'a été installé."
+    [ -f "$chemin" ] && [ -r "$chemin" ] || echec "Archive introuvable : $chemin." "Rien n'a été installé."
+    taille=$(stat -c %s "$chemin")
+    { [ "$taille" -gt 0 ] && [ "$taille" -le "$MAX" ]; } || \
+        echec "Archive $chemin vide ou trop grande ($taille octets)." "Rien n'a été installé."
+    recu=$(sha256sum "$chemin" | cut -d' ' -f1)
+    if [ "$recu" != "$attendu" ]; then
+        echec "EMPREINTES DIFFÉRENTES pour $chemin : rien n'a été installé." "attendue : $attendu" "reçue    : $recu" \
+            "Ne lance rien de cette archive. Récupère-la de nouveau et revérifie l'empreinte de référence."
+    fi
+    dire "   $(basename "$chemin") : empreinte vérifiée, identique à celle de référence."
+    liste=$(tar -tzf "$chemin") || echec "Archive $chemin illisible (pas un tar.gz)." "Rien n'a été installé."
+    grep -Ev "$motif" <<< "$liste" >/dev/null && \
+        echec "Archive $chemin inattendue (chemin hors de ce qu'elle doit contenir)." "Rien n'a été installé."
+    grep -E '(^|/)\.\.(/|$)' <<< "$liste" >/dev/null && echec "Archive $chemin inattendue (chemin avec ..)." "Rien n'a été installé."
+    for o in "$@"; do
+        grep -qx "$o" <<< "$liste" || echec "Archive $chemin incomplète : $o absent (archive trop ancienne ?)." "Rien n'a été installé."
+    done
+    EMPREINTE_LUE=$attendu
+}
+
+prerequis_installer() {
+    dire "== Prérequis"
+    [ -e "$R/etc/qubes-release" ] || echec "Ce n'est pas un dom0 Qubes (pas de /etc/qubes-release)." \
+        "qaf-installer se lance dans dom0, jamais dans un qube."
+    if essai; then [ -e "$R/run/qubesd.sock" ] || echec "qubesd injoignable ($R/run/qubesd.sock absent)."
+    elif ! { [ -S /run/qubesd.sock ] && existe qvm-prefs; }; then
+        echec "Ce n'est pas un vrai dom0 : qubesd injoignable." "qaf-installer se lance dans dom0, jamais dans un qube."
+    fi
+    grep -Eq 'release 4\.3([.[:space:]]|$)' "$R/etc/qubes-release" || \
+        echec "Version de Qubes non prise en charge : $(head -n 1 "$R/etc/qubes-release")." "QAF demande Qubes OS 4.3."
+    dire "   dom0 Qubes 4.3 : $(head -n 1 "$R/etc/qubes-release")"
+    local o
+    for o in python3 tar sha256sum flock; do existe "$o" || echec "Outil absent dans dom0 : $o."; done
+
+    # Empreintes demandées AVANT de lire les archives (comme qaf-update).
+    if [ -z "$ATTENDU" ]; then
+        read -r -p "Empreinte sha256 lue sur une source indépendante (jamais dans le qube qui a fourni l'archive) : " ATTENDU || true
+    fi
+    if [ "$EXT" = 1 ] && [ -z "$ATTENDU_EXT" ]; then
+        read -r -p "Empreinte sha256 de l'archive d'extension, lue sur une source indépendante : " ATTENDU_EXT || true
+    fi
+    verifier_archive "$ARCHIVE" "$ATTENDU" '^qaf/' qaf/tools/qaf-installer qaf/packaging/install.sh qaf/packaging/qaf-zone.conf
+    ATTENDU=$EMPREINTE_LUE
+    ! grep -Eq '^qaf/[^/]+/extension\.conf$' <<< "$(tar -tzf "$ARCHIVE")" || \
+        echec "L'archive du produit contient une extension : elle n'a pas été construite par make-dist.sh." "Rien n'a été installé."
+    if [ "$EXT" = 1 ]; then
+        verifier_archive "$EXT_ARCHIVE" "$ATTENDU_EXT" '^qaf/'
+        ATTENDU_EXT=$EMPREINTE_LUE
+        # Un seul dossier qaf/<nom>/, qui porte son extension.conf ; lue tout de suite
+        # (déclarations valides) dans un dossier temporaire, avant tout changement.
+        local nom liste essai_ext
+        liste=$(tar -tzf "$EXT_ARCHIVE")
+        nom=$(sed -n 's#^qaf/\([A-Za-z0-9_-]*\)/extension\.conf$#\1#p' <<< "$liste")
+        { [ -n "$nom" ] && [ "$(grep -c . <<< "$nom")" = 1 ] && ! grep -Evq "^qaf/($nom/.*)?$" <<< "$liste"; } || \
+            echec "Archive d'extension $EXT_ARCHIVE inattendue (un seul dossier qaf/<nom>/ avec son extension.conf)." \
+                "Rien n'a été installé."
+        essai_ext=$(mktemp -d)
+        A_EFFACER=$essai_ext
+        tar -xzf "$EXT_ARCHIVE" -C "$essai_ext" --no-same-owner --no-same-permissions
+        lire_extension "$essai_ext"
+        rm -rf "$essai_ext"
+        A_EFFACER=""
+    fi
+
+    # Place : disque de dom0 et pool des qubes.
+    local libre libre_dom0
+    libre_dom0=$(( $(df -Pk "$R/" | awk 'NR==2{print $4}') / 1024 ))
+    [ "$libre_dom0" -ge "$DOM0_MIN_MO" ] || \
+        echec "Place insuffisante dans dom0 : $libre_dom0 Mio libres, $DOM0_MIN_MO Mio demandés."
+    dire "   Place dans dom0 : $libre_dom0 Mio libres."
+    if [ "$PLACE_MIN_GO" != 0 ]; then
+        local pool taille_p usage
+        pool=$(qubes-prefs default_pool 2>/dev/null || true)
+        taille_p=$(qvm-pool info "$pool" 2>/dev/null | awk '$1=="size"{print $2}' || true)
+        usage=$(qvm-pool info "$pool" 2>/dev/null | awk '$1=="usage"{print $2}' || true)
+        [[ "$taille_p" =~ ^[0-9]+$ && "$usage" =~ ^[0-9]+$ ]] || \
+            echec "Impossible de mesurer la place du pool « $pool » (qvm-pool info)." \
+                "Vérifie à la main qu'il reste au moins $PLACE_MIN_GO Gio, puis relance avec QAF_PLACE_MIN_GO=0."
+        libre=$(( (taille_p - usage) / 1024 / 1024 / 1024 ))
+        [ "$libre" -ge "$PLACE_MIN_GO" ] || \
+            echec "Place insuffisante dans le pool « $pool » : $libre Gio libres, $PLACE_MIN_GO Gio demandés." \
+                "Libère de la place (qubes inutiles, anciennes sauvegardes), puis relance."
+        dire "   Place dans le pool $pool : $libre Gio libres."
+    fi
+
+    [ "$(qvm-prefs "$BASE" klass 2>/dev/null || true)" = TemplateVM ] || \
+        echec "Le modèle $BASE est absent." \
+            "Installe-le d'abord (Qubes Template Manager, ou : sudo qubes-dom0-update --action=install qubes-template-$BASE)," \
+            "puis relance. Rien n'a été installé."
+    dire "   Modèle $BASE présent."
+    session_ok
+}
+
+session_ok() {
+    if ! [[ "$UTIL" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || [ "$UTIL" = root ]; then
+        echec "Utilisateur de session introuvable ou invalide (« $UTIL »)." "Relance avec QAF_UTILISATEUR=nom."
+    fi
+    essai && return 0
+    id -u "$UTIL" >/dev/null 2>&1 || echec "Utilisateur de session « $UTIL » inconnu." "Relance avec QAF_UTILISATEUR=nom."
+    [ -S "/run/user/$(id -u "$UTIL")/bus" ] || \
+        echec "La session graphique de « $UTIL » n'est pas ouverte." \
+            "Ouvre ta session, lance la commande depuis un terminal de dom0, puis relance."
+    runuser -u "$UTIL" -- sudo -n true 2>/dev/null || \
+        echec "« $UTIL » n'a pas sudo sans mot de passe dans dom0 (réglage par défaut de Qubes)."
+    dire "   Session graphique de $UTIL ouverte."
+}
+
+# ---------------------------------------------------------------- installer
+installer() {
+    prerequis_installer
+    exec 9>"$R/run/qaf-installer.lock"
+    flock -n 9 || echec "Un autre qaf-installer tourne déjà."
+
+    # Étapes d'extension notées sans extension à poser ni gardée : leur --retour
+    # échouerait. Refus AVANT tout changement.
+    [ "$EXT" = 1 ] || charger_extension
+    local inconnues
+    inconnues=$(etapes_inconnues "$ETAT/etapes" | sort -u | tr '\n' ' ')
+    if [ -n "$inconnues" ]; then
+        echec "Étapes d'une extension installées ($inconnues), mais aucune archive d'extension n'est donnée." \
+            "Relance avec --extension=ARCHIVE (et --empreinte-extension=…). Rien n'a été changé."
+    fi
+
+    dire "== Copie de l'archive vérifiée -> $LIB"
+    rm -rf "$LIB.nouveau"
+    install -d -m 0755 "$LIB.nouveau"
+    tar -xzf "$ARCHIVE" -C "$LIB.nouveau" --no-same-owner --no-same-permissions
+    install -m 0644 "$ARCHIVE" "$LIB.nouveau/qaf.tar.gz"
+    # Extension à part ($LIB/extension/qaf/<nom>) : nouvelle avec --extension,
+    # sinon celle d'avant est gardée (son --retour en a besoin).
+    if [ "$EXT" = 1 ]; then
+        install -d -m 0755 "$LIB.nouveau/extension"
+        tar -xzf "$EXT_ARCHIVE" -C "$LIB.nouveau/extension" --no-same-owner --no-same-permissions
+    elif [ -d "$LIB/extension" ]; then
+        mv "$LIB/extension" "$LIB.nouveau/extension"
+    fi
+    rm -rf "$LIB"
+    mv "$LIB.nouveau" "$LIB"
+    charger_extension
+    SRC=$LIB/qaf
+    export QAF_ARCHIVE=$LIB/qaf.tar.gz
+    install -d -m 0755 "$(dirname "$LANCEUR")"
+    printf '#!/bin/bash\n# QAF : lanceur posé par tools/qaf-installer.\nexec bash /usr/lib/qaf-installer/qaf/tools/qaf-installer "$@"\n' > "$LANCEUR.tmp"
+    chmod 0755 "$LANCEUR.tmp"
+    mv "$LANCEUR.tmp" "$LANCEUR"
+
+    # Valeur d'origine de portier.json, sauvegardée une seule fois, AVANT
+    # install.sh (qui le pose s'il est absent).
+    install -d -m 0755 "$ETAT/sauve"
+    if [ ! -e "$ETAT/sauve/portier.json" ] && [ ! -e "$ETAT/sauve/portier.json.absent" ]; then
+        if [ -f "$PORTIER" ]; then cp -p "$PORTIER" "$ETAT/sauve/portier.json"
+        else : > "$ETAT/sauve/portier.json.absent"; fi
+    fi
+    [ -f "$ETAT/installe-le" ] || date '+%F %T' > "$ETAT/installe-le"
+
+    detecter_materiel "$SRC"
+    local etapes=$PRODUIT
+    declare -F materiel_appliquer >/dev/null && etapes="$etapes materiel"
+    [ "$EXT" = 1 ] && etapes="$etapes $EXT_ETAPES"
+    TOTAL=$(echo "$etapes" | wc -w)
+
+    dire ""
+    dire "== Plan"
+    dire "   Produit : $TOTAL étapes ; rien n'est fait sur un fichier livré par Qubes sans sauvegarde."
+    if [ -n "$MATERIEL_FICHIER" ]; then
+        dire "   Matériel : $MATERIEL_NOM (${MATERIEL_FICHIER#"$SRC"/})"
+        [ -n "$MATERIEL_NE_JAMAIS_DEMARRER" ] && dire "   Jamais démarrés sur cette machine : $MATERIEL_NE_JAMAIS_DEMARRER"
+        materiel_verifier "$R"
+    else
+        dire "   Matériel : machine inconnue ($(dmi sys_vendor) $(dmi product_name)), aucun profil matériel."
+    fi
+    dire "   Aucun paquet ajouté dans dom0 par QAF. Bureau : KDE Plasma (X11), paquet officiel de Qubes,"
+    dire "   à installer par toi : sudo qubes-dom0-update kde-settings-qubes (non installé par QAF)."
+    dire "   Paquets ajoutés dans les modèles : nodejs 22 (NodeSource), git, jq, Claude Code épinglé (tpl-agent) ;"
+    dire "   xdotool, x11-apps, x11-utils (tpl-qaf-hand et modèles d'origine, retirés par --retour)."
+    if [ "$EXT" = 1 ]; then
+        dire ""
+        dire "   ######################### ATTENTION : --extension #########################"
+        dire "   Extension « $(basename "$EXT_DOSSIER") », étapes en plus du produit :$EXT_ETAPES"
+        local l
+        for l in "${EXT_AVERTIR[@]}"; do dire "   $l"; done
+        dire "   Retrait : sudo qaf-installer --retour"
+        dire "   ##########################################################################"
+    elif [ -n "$(etapes_extension)" ]; then
+        dire "   ATTENTION : l'extension d'une installation précédente est toujours là (non touchée)."
+        dire "   Pour la retirer : sudo qaf-installer --retour"
+    fi
+
+    for e in $etapes; do etape e "$e"; done
+
+    dire ""
+    dire "QAF installé ($(date '+%F %T'))."
+    dire "  Compte de l'agent (une fois) : icône de l'agent dans la barre de Plasma, puis Claude (un"
+    dire "  terminal dans sys-agent), et connecte-toi (docs/INSTALLATION.md)."
+    dire "  Bureau : Plasma (X11), seule session proposée à l'écran de connexion (Xfce reste installé, caché)."
+    dire "  Tout retirer : sudo qaf-installer --retour"
+    dire ""
+    if ! verifier; then
+        dire ""
+        dire "Le contrôle de non-régression signale un écart (ci-dessus) : à regarder avant d'utiliser QAF."
+        return 3
+    fi
+}
+
+# ---------------------------------------------------------------- retirer
+retirer() {
+    exec 9>"$R/run/qaf-installer.lock"
+    flock -n 9 || echec "Un autre qaf-installer tourne déjà."
+    if [ ! -s "$ETAT/etapes" ] && [ ! -d "$LIB" ] && { [ "$PURGE" = 0 ] || [ ! -s "$ETAT/qubes-crees" ]; } \
+            && { [ "$MATERIEL" = 0 ] || [ ! -f "$ETAT/materiel" ]; }; then
+        dire "Rien à retirer : qaf-installer n'a rien installé ici."
+        return 0
+    fi
+    SRC=$ICI
+    [ -d "$LIB/qaf" ] && SRC=$LIB/qaf
+    detecter_materiel "$SRC"
+    charger_extension
+    local q a_purger="" e inconnues session=0
+    inconnues=$(etapes_inconnues "$ETAT/etapes" | tr '\n' ' ')
+    [ -z "$inconnues" ] || echec "Étapes notées inconnues du produit et de l'extension gardée : $inconnues" \
+        "Extension absente de $LIB/extension. Rien n'a été retiré." \
+        "Réinstalle d'abord avec --extension=ARCHIVE, puis relance --retour."
+    if [ "$PURGE" = 1 ]; then
+        for q in $CREES; do
+            grep -qx "$q" "$ETAT/qubes-crees" 2>/dev/null && qvm-check --quiet "$q" 2>/dev/null && a_purger="$a_purger $q"
+        done
+        dire "== --purge : en plus du retrait, suppression DÉFINITIVE des qubes créés par qaf-installer :"
+        dire "   ${a_purger:- (aucun)}"
+        dire "   ainsi que le journal et le registre du Doorman (/var/lib/qaf-exec…)."
+        dire "   Les qubes qui existaient avant l'installation ne sont jamais supprimés."
+        [ -f "$ETAT/materiel" ] && [ "$MATERIEL" = 0 ] && \
+            dire "   Gardé : masquage des disques internes, retrait par --retour --materiel."
+        local rep=""
+        read -r -p "Tape PURGER pour confirmer : " rep || true
+        [ "$rep" = PURGER ] || { dire "Pas de confirmation : rien n'a été fait."; return 1; }
+    fi
+    for e in $(cat "$ETAT/etapes" 2>/dev/null || true); do
+        case "$e" in securite) session=1 ;; esac
+        [ "${EXT_QUI[$e]:-}" = session ] && session=1
+    done
+    [ "$session" = 1 ] && session_ok
+    local etapes
+    etapes=$(tac "$ETAT/etapes" 2>/dev/null || true)
+    TOTAL=$(echo "$etapes" | wc -w)
+    for e in $etapes; do etape r "$e"; done
+    [ "$MATERIEL" = 1 ] && retirer_materiel
+    if [ -n "$a_purger" ]; then
+        dire ""
+        dire "== Suppression des qubes créés :$a_purger"
+        for q in $a_purger; do
+            qvm-shutdown --wait "$q" 2>/dev/null || true
+            qvm-remove -f "$q" || echec "Suppression de $q impossible (encore utilisé ? un jetable de qaf-dvm tourne ?)." \
+                "Le reste est retiré. Corrige, puis : sudo qaf-installer --retour --purge"
+            grep -vx "$q" "$ETAT/qubes-crees" > "$ETAT/qubes-crees.tmp" || true
+            mv "$ETAT/qubes-crees.tmp" "$ETAT/qubes-crees"
+            dire "   $q supprimé."
+        done
+    fi
+    dire ""
+    dire "== Fichiers de l'installateur"
+    rm -f "$LANCEUR"
+    rm -rf "$LIB" "$LIB.nouveau"
+    if { [ "$PURGE" = 1 ] || [ ! -s "$ETAT/qubes-crees" ]; } && [ ! -f "$ETAT/materiel" ]; then
+        rm -rf "$ETAT"
+    else
+        # Gardés : la liste des qubes créés (un --retour --purge plus tard les
+        # retrouve) et l'état de la couche matériel (--retour --materiel).
+        [ "$PURGE" = 1 ] && rm -f "$ETAT/qubes-crees"
+        find "$ETAT" -mindepth 1 ! -name qubes-crees ! -name materiel -exec rm -rf {} + 2>/dev/null || true
+    fi
+    dire "QAF retiré ($(date '+%F %T')). Journal gardé : $JOURNAL"
+    [ "$PURGE" = 1 ] || dire "Qubes créés gardés (sudo qaf-installer --retour --purge pour les supprimer)."
+    [ -f "$ETAT/materiel" ] && dire "Profil matériel gardé : disques internes toujours masqués (pour le retirer, depuis l'archive"         && dire "extraite : sudo bash qaf/tools/qaf-installer --retour --materiel)."
+    [ -f "$ETAT/materiel" ] && dire "Note : --retour seul ne rend donc pas la machine strictement identique (docs/INSTALLATION.md)."
+    dire ""
+    verifier || true
+}
+
+principal() {
+    set -e
+    dire ""
+    dire "######## qaf-installer $MODE $* — $(date '+%F %T')"
+    if [ "$MODE" = installer ]; then installer; else retirer; fi
+}
+set +e
+principal "$@" 2>&1 | tee -a "$JOURNAL"
+rc=${PIPESTATUS[0]}
+exit "$rc"

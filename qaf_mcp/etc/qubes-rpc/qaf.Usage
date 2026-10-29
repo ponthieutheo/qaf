@@ -1,0 +1,6 @@
+#!/bin/sh
+# Service qrexec qaf.Usage (sys-agent, installé dans tpl-agent) : mesure d'usage de
+# l'abonnement pour le panneau de l'agent de dom0 (qaf_mcp/usage.py). Lecture seule
+# de ~/.claude ; une ligne JSON bornée sur la sortie. -I : ni chemin utilisateur
+# ni PYTHON* ; /usr/lib/qaf ajouté explicitement (comme qaf.Request).
+exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/usr/lib/qaf"); from qaf_mcp.usage import main; sys.exit(main())'

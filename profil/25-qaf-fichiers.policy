@@ -1,0 +1,15 @@
+## QAF — profil/25-qaf-fichiers.policy, installé par profil/politique-fichiers.sh
+## dans /etc/qubes/policy.d/ (audit UI U58, décision du 25/10).
+## Trié après 00-qaf.policy (liste blanche de sys-agent) et avant 50-config-*
+## et 90-default.policy (qubes.Filecopy et qubes.OpenInVM en « ask ») :
+## premier match gagne.
+##
+## Depuis untrusted, ni vault ni les modèles ne sont des destinations possibles :
+## ils disparaissent de la liste de la confirmation native. Tout le reste est
+## inchangé : untrusted vers un autre qube reste demandé, et un autre qube vers
+## un modèle aussi (usage documenté de Qubes : copier un fichier dans un modèle).
+## Pas de « sys-agent » ni de @anyvm en source ici.
+
+qubes.Filecopy  *  untrusted  vault             deny
+qubes.Filecopy  *  untrusted  @type:TemplateVM  deny
+qubes.OpenInVM  *  untrusted  vault             deny

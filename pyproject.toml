@@ -1,0 +1,20 @@
+[project]
+name = "qaf"
+version = "0.0.1"
+description = "QAF (Qubes Agent First) : portier dom0, serveur MCP, service in-qube"
+requires-python = ">=3.11"
+license = { text = "GPL-2.0-or-later" }
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/ponthieutheo/qaf"
+Repository = "https://github.com/ponthieutheo/qaf.git"
+Issues = "https://github.com/ponthieutheo/qaf/issues"
+Security = "https://github.com/ponthieutheo/qaf/security/policy"
+
+[dependency-groups]
+dev = ["pytest>=8", "hypothesis>=6"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]  # tests/backend_sim.py : code de test, jamais installé dans dom0

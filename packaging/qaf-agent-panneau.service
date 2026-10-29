@@ -1,0 +1,14 @@
+[Unit]
+Description=QAF : panneau de l'agent (icône et carte d'usage dans la barre de Plasma)
+# Unité systemd --user (/etc/systemd/user), lancée à l'ouverture d'une session
+# Plasma par /etc/xdg/autostart/qaf-agent-panneau.desktop, qui lui passe DISPLAY et
+# XAUTHORITY (comme qaf-ui et qaf-suspension). Elle lance qvm-run, qvm-check et
+# qvm-start à argv fixe ; aucun droit en plus de ceux de la session.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/qaf-agent-panneau
+Restart=on-failure
+RestartSec=3

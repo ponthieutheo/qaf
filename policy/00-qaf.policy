@@ -1,0 +1,82 @@
+## QAF — politique qrexec du Doorman (installée dans /etc/qubes/policy.d/00-qaf.policy)
+## Format multifichier (qubes-core-qrexec, doc/multifile-policy.markdown) :
+##   SERVICE  +ARGUMENT|*  SOURCE  CIBLE  allow|deny|ask  [PARAM=VALEUR ...]
+## Premier match gagne. Les fichiers de /etc/qubes/policy.d et de
+## /run/qubes/policy.d sont fusionnés puis triés par NOM (parser.py,
+## load_policy_dirs) : préfixe 00 pour passer avant tout fichier livré par
+## Qubes. install.sh refuse d'installer si un fichier trié avant celui-ci
+## parle de sys-agent, qaf-agent, d'un jetable dispN, de @anyvm, @dispvm,
+## @tag:, @type: ou contient un !include (seule exception : notre propre
+## 00-qaf-agent-long.policy, identique à celui du dépôt).
+##
+## Agent jetable (docs/AGENT-JETABLE.md §5.2) : chaque demande de la palette
+## lance un agent neuf dans un jetable de qaf-agent-dvm, que l'exécuteur
+## étiquette qaf-agent après l'avoir créé. Les jetables d'agent sont en LISTE
+## BLANCHE : qaf.Plan, l'horloge et les services standard vers dom0, rien
+## d'autre. sys-agent (agent long, désactivé par défaut) n'a de lignes que dans
+## 00-qaf-agent-long.policy, posé seulement si portier.json dit agent_long ; il
+## est trié AVANT ce fichier pour passer devant les refus de qaf.Plan et
+## de qaf.Request. Sans lui, sys-agent n'est qu'un qube ordinaire, et le Doorman
+## le refuse aussi (défense en profondeur).
+## Pas de joker dans un nom de service (« admin.* » n'existe pas : parser.py
+## n'accepte que le nom exact ou « * »), d'où les refus finaux.
+
+## 1. Le seul service dom0 ouvert aux jetables de l'agent : le Doorman.
+## L'exécuteur revérifie ensuite l'identité (registre, UUID, modèle, étiquette).
+qaf.Plan                 *  @tag:qaf-agent  @adminvm  allow
+qaf.Plan                 *  @anyvm         @adminvm  deny
+qaf.Plan                 *  @anyvm         @anyvm    deny
+
+## 2. Exceptions explicites. Horloge : qvm-sync-clock appelle
+## qubes.GetDate+nanoseconds vers @default (qubes-core-agent-linux,
+## qubes-rpc/qvm-sync-clock) ; 90-default la redirige vers dom0. Sans elle
+## l'horloge du jetable dérive et le TLS vers l'API cloud peut échouer.
+## Exception, mesurée sur Qubes 4.3.2 le 25/10 (notifications « Denied:
+## qubes.WindowIconUpdater from sys-agent ») : les services standard que
+## 90-default autorise à TOUT qube vers dom0 restent permis ; les refuser
+## cassait le fonctionnement normal (icônes, avis de mises à jour, menus)
+## sans rien gagner, untrusted y a droit (règle n°1). Toute nouvelle
+## exception se pose ICI, avant les refus, et s'ajoute à tests/test_politique.py.
+qubes.GetDate           *  @tag:qaf-agent  @default  allow target=dom0
+qubes.WindowIconUpdater *  @tag:qaf-agent  dom0      allow
+qubes.FeaturesRequest   *  @tag:qaf-agent  dom0      allow
+qubes.NotifyTools       *  @tag:qaf-agent  dom0      allow
+qubes.NotifyUpdates     *  @tag:qaf-agent  dom0      allow
+qubes.GetRandomizedTime *  @tag:qaf-agent  dom0      allow
+qubes.SyncAppMenus      *  @tag:qaf-agent  dom0      allow
+
+## 2 bis. qaf.Request : dom0 (la palette) transmet la demande de l'utilisateur au jetable
+## qu'il vient de lancer (service qaf_mcp/etc/qubes-rpc/qaf.Request). Un appel
+## lancé DEPUIS dom0 (qvm-run --service, qrexec-client -d) ne consulte pas la
+## politique (qubes-core-qrexec, daemon/qrexec-client.c : aucune évaluation de
+## politique) : rien à autoriser ici. La ligne deny, elle, compte : aucun qube
+## ne peut injecter de fausse demande dans un agent (le service vérifie aussi
+## QREXEC_REMOTE_DOMAIN = dom0).
+qaf.Request              *  @anyvm     @anyvm     deny
+
+## 2 ter. Services de qaf_hand (dans les qubes cibles et les jetables) : appelés
+## depuis dom0 seulement (qaf-gate-taches pour qaf.Task), donc sans politique.
+## Refus explicites (H5) : aucun qube ne peut les appeler chez un autre.
+qaf.Task                 *  @anyvm     @anyvm     deny
+qaf.Exec                 *  @anyvm     @anyvm     deny
+qaf.Screen               *  @anyvm     @anyvm     deny
+qaf.Input                *  @anyvm     @anyvm     deny
+
+## 3. Tout le reste depuis un jetable de l'agent : refusé (C3, C10).
+## @adminvm couvre dom0, @adminvm et l'UUID de dom0 (parser.py, is_dom0) :
+## Admin API (admin.*), Policy API (policy.*) et tout service vers dom0.
+## @anyvm couvre tout le reste, y compris @default (que 90-default redirige
+## vers dom0 : qubes.Notifications), @dispvm et @dispvm:NOM (disposables
+## avec réseau : qubes.VMShell, VMExec, OpenURL, GetImageRGBA…), et les qubes
+## nommés (Filecopy, ConnectTCP…).
+*                       *  @tag:qaf-agent  @adminvm  deny
+*                       *  @tag:qaf-agent  @anyvm    deny
+
+## 4. [R-4] Rien VERS un jetable de l'agent, ni vers un jetable de son modèle
+## (@dispvm:qaf-agent-dvm couvre aussi l'appel vers @dispvm d'un qube dont le
+## default_dispvm serait qaf-agent-dvm : parser.py, DispVMTemplate.match).
+## Sans ces lignes, qubes.Filecopy @anyvm @anyvm ask de 90-default ouvrirait
+## un canal entre jetables soumis à un seul clic. dom0 (palette,
+## qaf-gate-taches) appelle sans politique : non concerné.
+*                       *  @anyvm  @tag:qaf-agent          deny
+*                       *  @anyvm  @dispvm:qaf-agent-dvm   deny

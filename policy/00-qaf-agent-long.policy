@@ -1,0 +1,21 @@
+## QAF — agent long (sys-agent), installé dans /etc/qubes/policy.d/00-qaf-agent-long.policy
+## SEULEMENT si /etc/qaf/portier.json dit "agent_long": true (docs/AGENT-JETABLE.md §11).
+## Nom trié AVANT 00-qaf.policy (« - » avant « . ») : ces lignes passent devant
+## les refus de qaf.Plan et de qaf.Request de 00-qaf.policy (premier match gagne).
+## install.sh l'accepte avant 00-qaf.policy seulement s'il est identique au
+## fichier du dépôt ; il le retire quand agent_long est faux.
+## sys-agent est en LISTE BLANCHE : qaf.Plan, l'horloge et les services
+## standard vers dom0, rien d'autre. Il garde son volume privé : il est
+## influencé en permanence (l'exécuteur le traite ainsi).
+
+qaf.Plan                 *  sys-agent  @adminvm  allow
+qaf.Request              *  @adminvm   sys-agent  allow
+qubes.GetDate           *  sys-agent  @default  allow target=dom0
+qubes.WindowIconUpdater *  sys-agent  dom0      allow
+qubes.FeaturesRequest   *  sys-agent  dom0      allow
+qubes.NotifyTools       *  sys-agent  dom0      allow
+qubes.NotifyUpdates     *  sys-agent  dom0      allow
+qubes.GetRandomizedTime *  sys-agent  dom0      allow
+qubes.SyncAppMenus      *  sys-agent  dom0      allow
+*                       *  sys-agent  @adminvm  deny
+*                       *  sys-agent  @anyvm    deny

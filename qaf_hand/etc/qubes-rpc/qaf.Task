@@ -1,0 +1,5 @@
+#!/bin/sh
+# Service qrexec qaf.Task (qaf-hand, JETABLE du modèle QAF seulement). Appelé par
+# l'exécuteur du Doorman (dom0). Lit {"tache": "..."}, confie la tâche au
+# coureur détaché, répond aussitôt. -I : pas de chemin utilisateur ni de PYTHON*.
+exec /usr/bin/python3 -I -m qaf_hand task

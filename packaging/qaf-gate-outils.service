@@ -1,0 +1,84 @@
+[Unit]
+Description=QAF Doorman : outils de Qubes à argv fixe (qubes-vm-update, qvm-template, qvm-backup)
+Requires=qaf-gate-outils.socket
+After=qaf-gate-outils.socket qubesd.service
+Wants=qubesd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/qaf/qaf-gate-outils
+User=qaf-outils
+Group=qaf-outils
+# D13 : ce processus réunit les deux droits que H3 sépare ailleurs. qubesd
+# (/run/qubesd.sock, groupe qubes) pour qvm-template, qvm-backup et
+# qubes-vm-update ; vchan pour les qrexec-client de qubes-vm-update (agent de
+# mise à jour lancé par qubes.VMExec) et de qvm-template (qubes.TemplateSearch
+# et TemplateDownload dans l'updatevm). Il ne reçoit que des messages fermés de
+# l'exécuteur et construit lui-même chaque argv (qaf_gate/outils.py).
+# Ni root ni sudo : sondes P-1 et P-2 (25/10).
+SupplementaryGroups=qubes
+UMask=0077
+# P-2 : qvm-template veut un HOME (cache ~/.cache/qvm-template) et un dossier de
+# travail à lui (--downloaddir . par défaut).
+StateDirectory=qaf-outils
+StateDirectoryMode=0700
+Environment=HOME=/var/lib/qaf-outils
+WorkingDirectory=/var/lib/qaf-outils
+# Seule écriture hors de son HOME : le journal de qubes-vm-update
+# (/var/log/qubes/qubes-vm-update.log, groupe qubes). /run/qubes reste en
+# lecture seule (ProtectSystem=strict ; connect() sur les sockets qrexec.* reste
+# permis) : mesuré sur Qubes 4.3.2 le 25/10, seul « qvm-template
+# install » prend /run/qubes/qvm-template.lock, et template.install est N4.
+# qvm-template list (cache dans HOME, /var/tmp privé) et remove (qubesd seul),
+# qvm-backup (qubesd seul) n'écrivent pas dans /run/qubes.
+ReadWritePaths=/var/log/qubes
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Mêmes périphériques Xen que qaf-gate-taches (vchan) ; hypercall : mesuré sur
+# Qubes 4.3.2, sans lui qrexec-client échoue avec le code 125.
+PrivateDevices=no
+DevicePolicy=closed
+DeviceAllow=/dev/xen/evtchn rw
+DeviceAllow=/dev/xen/gntalloc rw
+DeviceAllow=/dev/xen/gntdev rw
+DeviceAllow=/dev/xen/xenbus rw
+DeviceAllow=/dev/xen/privcmd rw
+DeviceAllow=/dev/xen/hypercall rw
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+# Seul qubesd.sock lui sert ; ni X, ni sudo, ni les sockets internal/misc.
+InaccessiblePaths=-/tmp/.X11-unix -/run/qubesd.internal.sock -/run/qubesd.misc.sock -/etc/sudoers -/etc/sudoers.d
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# Appel filtré : EPERM plutôt que SIGSYS, pour qu'un outil échoue proprement
+# au lieu de laisser un modèle à moitié importé (Règle n°1).
+SystemCallErrorNumber=EPERM
+MemoryMax=1G
+TasksMax=64
+# Arrêt du service : le travail en cours reçoit SIGTERM, comme un outil
+# interrompu à la main (OPS-v3 §14).
+KillMode=control-group
+
+[Install]
+Also=qaf-gate-outils.socket

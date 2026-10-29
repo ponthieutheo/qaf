@@ -1,0 +1,6 @@
+#!/bin/sh
+# Service qrexec qaf.Request (sys-agent, installé dans tpl-agent) : dom0 transmet
+# la demande de l'utilisateur tapée dans la palette. JSON borné sur stdin.
+# -I : ni chemin utilisateur ni PYTHON* ; /usr/lib/qaf ajouté explicitement
+# (qaf_hand l'a appris à ses dépens : -m ignore PYTHONPATH avec -I).
+exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/usr/lib/qaf"); from qaf_mcp.demande import main; sys.exit(main())'

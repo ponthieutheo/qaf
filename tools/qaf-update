@@ -1,0 +1,86 @@
+#!/bin/bash
+# qaf-update — met à jour le Doorman QAF dans dom0 (à lancer par l'utilisateur, dans dom0).
+#
+#   qaf-update --qube=QUBE [--archive=CHEMIN] [EMPREINTE]
+#
+# QUBE (OBLIGATOIRE, ou variable QAF_SOURCE_QUBE) : le qube qui a construit
+# l'archive avec tools/make-dist.sh. CHEMIN (ou QAF_SOURCE_ARCHIVE) : l'archive
+# dans ce qube, relatif à son dossier personnel ; défaut qaf/dist/qaf.tar.gz
+# (dépôt cloné dans ~/qaf).
+# 1. demande D'ABORD l'EMPREINTE de référence (argument, sinon saisie), lue sur
+#    une source INDÉPENDANTE de ce qube : dépôt de référence, ou make-dist.sh
+#    lancé sur une autre machine (C12) ;
+# 2. récupère ensuite l'archive depuis ce qube par qvm-run --pass-io ;
+# 3. seulement si les empreintes sont identiques : extrait et lance
+#    packaging/install.sh.
+# L'empreinte reçue n'est jamais affichée avant la comparaison (sinon on est
+# tenté de recopier celle qu'on vient de voir) ; elle ne l'est qu'en cas d'écart.
+# Rien n'est extrait ni exécuté avant la vérification.
+set -euo pipefail
+
+QUBE=${QAF_SOURCE_QUBE:-}
+ARCHIVE=${QAF_SOURCE_ARCHIVE:-qaf/dist/qaf.tar.gz}
+MAX=$((20 * 1024 * 1024))
+ATTENDU=""
+for a in "$@"; do
+    case "$a" in
+        --qube=*) QUBE=${a#--qube=} ;;
+        --archive=*) ARCHIVE=${a#--archive=} ;;
+        -*) echo "Option inconnue : $a (usage : qaf-update --qube=QUBE [--archive=CHEMIN] [EMPREINTE])" >&2; exit 2 ;;
+        *) ATTENDU=$a ;;
+    esac
+done
+if ! [[ "$QUBE" =~ ^[a-zA-Z][a-zA-Z0-9_.-]{0,30}$ ]]; then
+    echo "Qube source absent ou invalide : qaf-update --qube=QUBE (le qube qui a construit l'archive)." >&2
+    exit 2
+fi
+if ! [[ "$ARCHIVE" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]] || [[ "$ARCHIVE" == *..* ]]; then
+    echo "Chemin d'archive invalide : $ARCHIVE" >&2
+    exit 2
+fi
+
+if [ -z "$ATTENDU" ]; then
+    read -r -p "Empreinte sha256 lue sur une source indépendante (jamais dans $QUBE) : " ATTENDU
+fi
+ATTENDU=$(printf '%s' "$ATTENDU" | tr -d '[:space:]' | tr 'A-F' 'a-f')
+if ! printf '%s' "$ATTENDU" | grep -Eq '^[0-9a-f]{64}$'; then
+    echo "Empreinte invalide (64 caractères hexadécimaux attendus) : abandon." >&2
+    exit 1
+fi
+
+TMP=$(mktemp -d /tmp/qaf-update.XXXXXX)
+trap 'rm -rf "$TMP"' EXIT
+
+echo "Récupération de $ARCHIVE depuis $QUBE…"
+# qvm-run : option --pass-io (qubesadmin/tools/qvm_run.py). head borne la taille.
+if ! qvm-run --pass-io --no-gui "$QUBE" "cat -- \"\$HOME/$ARCHIVE\"" | head -c $((MAX + 1)) > "$TMP/qaf.tar.gz"; then
+    echo "Échec de la récupération (archive absente, ou plus de $MAX octets)." >&2
+    exit 1
+fi
+TAILLE=$(stat -c %s "$TMP/qaf.tar.gz")
+if [ "$TAILLE" -gt "$MAX" ] || [ "$TAILLE" -eq 0 ]; then
+    echo "Archive vide ou trop grande ($TAILLE octets) : abandon." >&2
+    exit 1
+fi
+
+RECU=$(sha256sum "$TMP/qaf.tar.gz" | cut -d' ' -f1)
+if [ "$ATTENDU" != "$RECU" ]; then
+    echo "EMPREINTES DIFFÉRENTES : rien n'est installé." >&2
+    echo "  attendue : $ATTENDU" >&2
+    echo "  reçue    : $RECU" >&2
+    exit 1
+fi
+echo "Empreinte vérifiée : identique à celle de référence."
+
+# Archive désormais de confiance ; on refuse quand même tout chemin hors de qaf/.
+if tar -tzf "$TMP/qaf.tar.gz" | grep -Ev '^qaf/' | grep -q .; then
+    echo "Archive inattendue (chemin hors de qaf/) : abandon." >&2
+    exit 1
+fi
+if tar -tzf "$TMP/qaf.tar.gz" | grep -Eq '(^|/)\.\.(/|$)'; then
+    echo "Archive inattendue (chemin avec ..) : abandon." >&2
+    exit 1
+fi
+mkdir "$TMP/x"
+tar -xzf "$TMP/qaf.tar.gz" -C "$TMP/x" --no-same-owner --no-same-permissions
+sudo bash "$TMP/x/qaf/packaging/install.sh"

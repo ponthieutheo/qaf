@@ -1,0 +1,14 @@
+[Unit]
+Description=QAF Doorman : socket du validateur (joint par le talon qrexec qaf.Plan)
+
+[Socket]
+ListenStream=/run/qaf-gate/validator.sock
+# Le talon tourne sous l'utilisateur de bureau de dom0 (groupe qubes).
+SocketUser=qaf-gate
+SocketGroup=qubes
+SocketMode=0660
+DirectoryMode=0755
+Accept=no
+
+[Install]
+WantedBy=sockets.target

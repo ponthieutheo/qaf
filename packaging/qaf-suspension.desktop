@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=QAF : suspension des confirmations
+Name[en]=QAF: confirmation suspension
+Name[zh_CN]=QAF：免确认
+Comment=Démarre l'icône qaf-suspension (systemd --user) dans la barre de Plasma
+Comment[en]=Starts the qaf-suspension icon (systemd --user) in the Plasma panel
+Comment[zh_CN]=在 Plasma 任务栏中启动 qaf-suspension 图标（systemd --user）
+Exec=sh -c "systemctl --user import-environment DISPLAY XAUTHORITY LANG LANGUAGE LC_ALL LC_MESSAGES; systemctl --user restart qaf-suspension.service"
+Terminal=false
+StartupNotify=false
+NoDisplay=true
+OnlyShowIn=KDE;

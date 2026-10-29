@@ -1,0 +1,63 @@
+[Unit]
+Description=QAF Doorman : envoi des tâches aux jetables (qaf.Task par qrexec-client, rien d'autre)
+Requires=qaf-gate-taches.socket
+After=qaf-gate-taches.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/qaf/qaf-gate-taches
+User=qaf-taches
+Group=qaf-taches
+# H3 : qrexec-client se connecte au socket du qrexec-daemon du jetable
+# (/var/run/qubes/qrexec.dispNNNN, groupe qubes) puis ouvre un serveur vchan
+# (qubes-core-qrexec, daemon/qrexec-client.c : libvchan_server_init). Ces
+# accès restent ICI, pas dans l'exécuteur qui tient qubesd. Ce service ne
+# peut PAS joindre qubesd : InaccessiblePaths ci-dessous.
+SupplementaryGroups=qubes
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Périphériques : seulement ceux du vchan. Liste à MESURER sur le vrai dom0
+# (strace de qvm-run --pass-io) et à réduire : privcmd est peut-être inutile.
+# hypercall : mesuré sur Qubes 4.3.2 (25/10) ; sans lui,
+# qrexec-client échoue (« xencall: error: Error on trying to open hypercall
+# buffer device », code 125) et aucun appel qrexec du Doorman n'aboutit.
+PrivateDevices=no
+DevicePolicy=closed
+DeviceAllow=/dev/xen/evtchn rw
+DeviceAllow=/dev/xen/gntalloc rw
+DeviceAllow=/dev/xen/gntdev rw
+DeviceAllow=/dev/xen/xenbus rw
+DeviceAllow=/dev/xen/privcmd rw
+DeviceAllow=/dev/xen/hypercall rw
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+InaccessiblePaths=-/tmp/.X11-unix -/run/qubesd.sock -/run/qubesd.internal.sock -/run/qubesd.misc.sock -/var/lib/qubes -/etc/sudoers -/etc/sudoers.d
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+MemoryMax=128M
+TasksMax=16
+
+[Install]
+Also=qaf-gate-taches.socket

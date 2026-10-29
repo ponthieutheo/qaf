@@ -1,0 +1,4 @@
+#!/bin/sh
+# Service qrexec qaf.Connexion+FOURNISSEUR (sys-agent, installé dans tpl-agent) :
+# terminal de connexion de la CLI du fournisseur (qaf_mcp/console.py).
+exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/usr/lib/qaf"); from qaf_mcp.console import main; sys.exit(main(["connexion"]))'

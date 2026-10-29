@@ -1,0 +1,3 @@
+# Attendre la session graphique : le service hérite alors de DISPLAY (qubes-run-xorg).
+# Format : qubes-core-qrexec, qubes-rpc-config/README.
+wait-for-session=true

@@ -1,0 +1,16 @@
+[Unit]
+Description=QAF : filet contre le gel du pointeur (saisie X synchrone jamais libérée)
+# Unité systemd --user (/etc/systemd/user), lancée à l'ouverture d'une session
+# Plasma par /etc/xdg/autostart/qaf-degel.desktop, qui lui passe DISPLAY et
+# XAUTHORITY (comme qaf-ui). Lit les événements bruts XI2 ; n'agit (option XKB
+# grab:break_actions le temps d'une touche XF86Ungrab tapée par XTest) que
+# pendant un gel détecté. Cause et preuves : docs/GEL-BUREAU.md.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/qaf/qaf-degel
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes

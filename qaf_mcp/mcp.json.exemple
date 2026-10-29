@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "qaf": {
+      "type": "stdio",
+      "command": "/usr/bin/python3",
+      "args": ["-m", "qaf_mcp"],
+      "env": {
+        "PYTHONPATH": "/usr/lib/qaf",
+        "QAF_FICHIER_DEMANDE": "/run/qaf/demande"
+      }
+    }
+  }
+}

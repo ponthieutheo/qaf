@@ -1,0 +1,13 @@
+{
+  "coffres": ["vault"],
+  "jetables": ["qaf-dvm"],
+  "systeme": ["sys-usb", "sys-audio", "sys-whonix"],
+  "admin_qubes": [],
+  "ne_jamais_demarrer": [],
+  "coffres_entrables": [],
+  "agent_long": true,
+  "agents_max": 4,
+  "agent_inactivite": 60,
+  "agent_duree_max": 480,
+  "agent_hotes": ["api.anthropic.com"]
+}

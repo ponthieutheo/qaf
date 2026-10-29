@@ -1,0 +1,4 @@
+#!/bin/sh
+# Service qrexec qaf.Console (sys-agent, installé dans tpl-agent) : console de
+# l'agent ouverte depuis le panneau de dom0 (qaf_mcp/console.py).
+exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/usr/lib/qaf"); from qaf_mcp.console import main; sys.exit(main(["console"]))'

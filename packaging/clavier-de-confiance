@@ -1,0 +1,10 @@
+# /etc/qaf/clavier-de-confiance — seul périphérique qui peut AUTORISER dans la
+# fenêtre de confirmation (C11). Refuser reste possible partout.
+# 1re ligne utile : nom exact du périphérique (xinput list, ou « N: Name= »
+# dans /proc/bus/input/devices). Ligne « phys= » facultative : début de son
+# emplacement (« P: Phys= »). Le nom doit être unique : un second périphérique
+# du même nom (clavier USB qui l'usurpe) bloque toute autorisation.
+# Fichier vide de nom = aucune autorisation possible.
+# install.sh ne remplace jamais ce fichier une fois posé.
+AT Raw Set 2 keyboard
+phys=isa0060/serio0

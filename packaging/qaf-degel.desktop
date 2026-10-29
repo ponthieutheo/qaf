@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=QAF : filet contre le gel du pointeur
+Name[en]=QAF: pointer-freeze safety net
+Name[zh_CN]=QAF：防止指针冻结的安全网
+Comment=Démarre qaf-degel (systemd --user) dans la session Plasma
+Comment[en]=Starts qaf-degel (systemd --user) in the Plasma session
+Comment[zh_CN]=在 Plasma 会话中启动 qaf-degel（systemd --user）
+Exec=sh -c "systemctl --user import-environment DISPLAY XAUTHORITY LANG LANGUAGE LC_ALL LC_MESSAGES; systemctl --user restart qaf-degel.service"
+Terminal=false
+StartupNotify=false
+NoDisplay=true
+OnlyShowIn=KDE;

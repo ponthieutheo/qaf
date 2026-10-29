@@ -1,0 +1,61 @@
+[Unit]
+Description=QAF Doorman : exécuteur (seul client de qubesd, journal et registre)
+Requires=qaf-gate-executor.socket qaf-gate-demande.socket
+After=qaf-gate-executor.socket qaf-gate-demande.socket qaf-gate-taches.socket qaf-gate-outils.socket qubesd.service
+Wants=qubesd.service qaf-gate-taches.socket qaf-gate-outils.socket
+
+[Service]
+Type=simple
+# Deux sockets, reconnus par leur FileDescriptorName (plan, demande).
+Sockets=qaf-gate-executor.socket qaf-gate-demande.socket
+ExecStart=/usr/libexec/qaf/qaf-gate-executor
+User=qaf-exec
+Group=qaf-exec
+# Le groupe qubes donne accès à /run/qubesd.sock (qubes/api/__init__.py :
+# socket chown groupe qubes, umask 007). C'est l'équivalent de root dans dom0 :
+# d'où un processus séparé qui ne parse que des plans déjà canoniques.
+SupplementaryGroups=qubes
+StateDirectory=qaf-exec
+# 0711 : le validateur peut tester par lstat la présence de pause-auto sans
+# lister le dossier ; journal et registre restent en 0600 (UMask).
+StateDirectoryMode=0711
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+# Seul qubesd.sock lui est utile : les sockets internal et misc, eux aussi en
+# groupe qubes (qubes/api/internal.py, misc.py), lui sont fermés.
+InaccessiblePaths=-/tmp/.X11-unix -/run/qubesd.internal.sock -/run/qubesd.misc.sock -/etc/sudoers -/etc/sudoers.d
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+MemoryMax=256M
+TasksMax=32
+# H3 : l'exécuteur ne lance jamais qrexec-client (vchan, périphériques Xen).
+# Pour dispvm.run_task, il crée et démarre le jetable par qubesd, puis passe
+# la tâche à qaf-gate-taches par /run/qaf-taches/taches.sock (groupe qaf-exec).
+# Son confinement reste donc entier : PrivateDevices=yes.
+
+[Install]
+Also=qaf-gate-executor.socket qaf-gate-demande.socket

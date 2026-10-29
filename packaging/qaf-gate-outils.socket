@@ -1,0 +1,15 @@
+[Unit]
+Description=QAF Doorman : socket de qaf-gate-outils (réservé à l'exécuteur)
+
+[Socket]
+ListenStream=/run/qaf-outils/outils.sock
+# Seul l'exécuteur (groupe qaf-exec) peut s'y connecter ; outils.py revérifie
+# l'uid du pair (SO_PEERCRED).
+SocketUser=qaf-outils
+SocketGroup=qaf-exec
+SocketMode=0660
+DirectoryMode=0755
+Accept=no
+
+[Install]
+WantedBy=sockets.target

@@ -1,0 +1,14 @@
+* text=auto eol=lf
+*.png binary
+# Dossiers livrés dans dom0 : aucune conversion, l'archive (make-dist.sh)
+# contient exactement les octets commités. Les tests vérifient qu'il n'y a pas
+# de CR dans ces fichiers.
+qaf_gate/** -text
+packaging/** -text
+policy/** -text
+tools/** -text
+qaf_mcp/** -text
+qaf_hand/** -text
+qaf_ui/** -text
+profil/** -text
+materiel/** -text

@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Agent
+Name[en]=Agent
+Name[zh_CN]=智能体
+GenericName=Panneau de l'agent
+GenericName[en]=Agent panel
+GenericName[zh_CN]=智能体面板
+Comment=Ce que fait l'agent, pause d'urgence, terminal de l'agent
+Comment[en]=What the agent is doing, emergency pause, agent terminal
+Comment[zh_CN]=智能体在做什么、紧急暂停、智能体终端
+Exec=qaf-agent
+Icon=starred-symbolic
+Terminal=false
+StartupNotify=false
+Categories=System;X-QAF;

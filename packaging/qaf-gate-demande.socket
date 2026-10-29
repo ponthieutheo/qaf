@@ -1,0 +1,20 @@
+[Unit]
+Description=QAF Doorman : socket des demandes de l'utilisateur (joint par la palette qaf-palette)
+
+[Socket]
+ListenStream=/run/qaf-exec/demande.sock
+# La palette tourne sous l'utilisateur de bureau de dom0 (groupe qubes). Le
+# validateur (qaf-gate) n'est pas dans ce groupe : il ne peut pas créer de
+# demande. Socket distinct de executor.sock : l'exécuteur n'y accepte que
+# {"type": "demande"} (executor.traiter_demande).
+SocketUser=qaf-exec
+SocketGroup=qubes
+SocketMode=0660
+DirectoryMode=0755
+Accept=no
+# Nom du descripteur reçu par l'exécuteur (LISTEN_FDNAMES, proto._fd_systemd).
+FileDescriptorName=demande
+Service=qaf-gate-executor.service
+
+[Install]
+WantedBy=sockets.target

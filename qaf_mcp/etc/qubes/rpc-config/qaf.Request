@@ -1,0 +1,5 @@
+# Attendre la session graphique : le service hérite alors de DISPLAY et peut
+# ouvrir le terminal de l'agent (comme qubes.StartApp, qubes.ShowInTerminal).
+# Format : qubes-core-qrexec, qubes-rpc-config/README. Ne jamais appeler ce
+# service avec qvm-run --no-gui (« nogui: » fait ignorer ce réglage).
+wait-for-session=true

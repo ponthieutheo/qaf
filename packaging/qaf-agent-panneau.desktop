@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=QAF : panneau de l'agent
+Name[en]=QAF: agent panel
+Name[zh_CN]=QAF：智能体面板
+Comment=Démarre l'icône qaf-agent-panneau (systemd --user) dans la barre de Plasma
+Comment[en]=Starts the qaf-agent-panneau icon (systemd --user) in the Plasma panel
+Comment[zh_CN]=在 Plasma 任务栏中启动 qaf-agent-panneau 图标（systemd --user）
+Exec=sh -c "systemctl --user import-environment DISPLAY XAUTHORITY LANG LANGUAGE LC_ALL LC_MESSAGES; systemctl --user restart qaf-agent-panneau.service"
+Terminal=false
+StartupNotify=false
+NoDisplay=true
+OnlyShowIn=KDE;

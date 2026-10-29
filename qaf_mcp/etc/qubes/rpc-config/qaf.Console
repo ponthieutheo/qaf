@@ -1,0 +1,3 @@
+# qaf.Console ouvre un terminal : attendre la session graphique (comme qaf.Request).
+# Ne jamais appeler ce service avec qvm-run --no-gui.
+wait-for-session=true
