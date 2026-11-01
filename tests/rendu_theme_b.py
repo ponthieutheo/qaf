@@ -24,6 +24,7 @@ class _FauxPanneau:
         self.allume, self.derniere, self.statut = allume, mesure, statut
         self.heure = time.time()
         self.connexion, self.ajout, self.label = None, False, 0x75507B
+        self.bascule, self.bascule_echec, self.notes = None, False, ()
 
     def etat_carte(self):
         from qaf_ui.ecrans import agent_panneau as p

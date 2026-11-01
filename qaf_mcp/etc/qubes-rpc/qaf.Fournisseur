@@ -1,0 +1,4 @@
+#!/bin/sh
+# Service qrexec qaf.Fournisseur+ID (sys-agent, installé dans tpl-agent) : dom0 choisit
+# le fournisseur actif (qaf_mcp/fournisseurs.py). Une ligne « ok » ou « non » sur la sortie.
+exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/usr/lib/qaf"); from qaf_mcp.fournisseurs import bascule; sys.exit(bascule())'

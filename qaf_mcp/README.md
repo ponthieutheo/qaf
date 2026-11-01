@@ -65,6 +65,31 @@ qaf_mcp ──plan {"request": R-xxxxxx, "session": S-…, ...}──▶ portier
   identifiant n'autorise rien : il empêche seulement une autre session
   d'hériter de la demande.
 
+## Fournisseurs de l'agent
+
+Les 35 fournisseurs d'Omarchy, plugin agents et lanceur : `fournisseurs_table.py` (table
+déclarative, versions épinglées), `fournisseurs.py` (actif, réglages, lancement, état,
+santé, installation), `assistant.py` (terminal de connexion), `lanceur.py` (serveur
+MCP pour les CLI autres que Claude Code). Choix dans sys-agent, jamais dans le Doorman.
+
+- `~/.config/qaf/fournisseurs/` : `actif`, `connexion`, `lancements.json`, et par
+  fournisseur `settings.json`, `cle`, `config.json`, `test.json` (dossiers 0700,
+  fichiers 0600). `~/.claude/settings.json` n'est jamais touché, jamais de `/logout`.
+- Vers un tiers : `claude --settings <fichier 0600>`, `ANTHROPIC_API_KEY` vide et un
+  `apiKeyHelper` ou un jeton explicite, y compris pour un serveur local sans clé.
+  Sinon le jeton OAuth partirait chez le tiers : `reglages_valides()` refuse le
+  lancement, et l'agent repart sur Claude.
+- Une CLI sans serveur qaf configuré ne devient jamais l'agent ; grokbot, pi, ori, mcode, kiro-cli, freebuff et amp restent
+  « connexion seule ». Jamais `--yolo` ni équivalent.
+- Installation à la demande depuis l'assistant : `~/.local`, sans sudo. Rien de plus
+  dans tpl-agent que le code de `qaf_mcp`.
+- `lanceur.py` lit `~/.config/qaf/demande`, écrit par `qaf.Request` seulement quand
+  une CLI est active, si `QAF_REQUEST` n'arrive pas : l'identifiant n'est qu'un
+  renvoi, le Doorman ne croit que son registre. La console l'efface.
+- Retrait d'un fournisseur : menu de l'assistant. Tout retirer de sys-agent, sans
+  toucher à Claude :
+  `python3 -I -c 'import os, sys; sys.path.insert(0, "/usr/lib/qaf"); from qaf_mcp.fournisseurs import retirer_tout; retirer_tout(os.path.expanduser("~"))'`
+
 ## TODO
 
 - Un plan = une opération. Les plans à plusieurs étapes (créer + donner le réseau)

@@ -388,7 +388,7 @@ def test_install_panneau_de_l_agent_puis_retire(tmp_path):
 
 def test_services_du_panneau_dans_tpl_agent():
     s = (RACINE / "tools/setup-sys-agent.sh").read_text(encoding="utf-8")
-    for svc in ("qaf.Usage", "qaf.Console", "qaf.Connexion"):
+    for svc in ("qaf.Usage", "qaf.Console", "qaf.Connexion", "qaf.Fournisseur"):
         assert (RACINE / "qaf_mcp/etc/qubes-rpc" / svc).is_file()
         assert svc in s
     for svc in ("qaf.Console", "qaf.Connexion"):  # ouvrent un terminal : attendent la session

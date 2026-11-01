@@ -24,13 +24,16 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 import cairo  # noqa: E402
 
+from qaf_ui import confirmation, palette  # noqa: E402
 from qaf_ui import sni  # noqa: E402
 from qaf_ui import zone  # noqa: E402
 from qaf_ui import usage as u  # noqa: E402
+from qaf_ui import voisin as v  # noqa: E402
 from qaf_ui.ecrans import agent_panneau as p  # noqa: E402
 from qaf_ui.nuit import composants as c  # noqa: E402
 from qaf_ui.nuit import contraste, icones, jetons as j  # noqa: E402
 from qaf_ui import couleurs_plasma  # noqa: E402
+from qaf_ui.fenetre import appareil  # noqa: E402
 from qaf_ui.i18n import t  # noqa: E402
 
 # Couleurs du thème Plasma (28/10 : la carte doit aller avec la barre) ;
@@ -111,22 +114,58 @@ window.qaf-surface.qaf-panneau-agent {{ background-color: {k.SURFACE}; border: 2
 .qaf-panneau-agent button.pa-carre {{ min-width: {p.BOUTON}px; min-height: {p.BOUTON}px; padding: 0;
     background-color: {j.SIGNATURE_FOND}; border: 1px solid {j.SIGNATURE_FOND}; border-radius: {j.RAYON}px; }}
 .qaf-panneau-agent button.pa-carre .qaf-icone {{ color: {j.SIGNATURE}; }}
-.qaf-panneau-agent button.pa-grand {{ padding: 16px 8px 12px 8px;
-    background-color: {k.CHAMP}; border: none; border-radius: {j.RAYON}px; }}
 .qaf-panneau-agent button.pa-carre:hover, .qaf-panneau-agent button.pa-carre:focus {{
     border-color: {j.SIGNATURE}; }}
-.qaf-panneau-agent button.pa-grand:hover, .qaf-panneau-agent button.pa-grand:focus {{
-    background-color: {k.CHOISI}; }}
-.qaf-panneau-agent button.pa-grand:disabled {{ background-color: {k.CHAMP}; }}
-.qaf-panneau-agent button.pa-grand label {{ font-size: {j.TAILLE_CORPS}px; font-weight: {j.GRAISSE_ACCENT}; color: {k.T1}; }}
-.qaf-panneau-agent button.pa-grand label.pa-note {{ font-size: {j.TAILLE_PETITE}px; font-weight: {j.GRAISSE}; color: {k.T3}; }}
-.qaf-panneau-agent button.pa-grand:disabled label {{ color: {k.T3}; }}
 .qaf-panneau-agent button.pa-lien {{ padding: 0; min-height: 0; background-color: transparent; border: none; }}
 .qaf-panneau-agent button.pa-lien label {{ font-size: {j.TAILLE_CORPS}px; color: {k.T2};
     text-decoration-line: underline; }}
-.qaf-panneau-agent button.pa-lien.pa-alerte label {{ color: {k.ATTENTION}; }}
+.qaf-panneau-agent button.pa-lien.pa-alerte label {{ color: {j.DANGER}; }}
 .qaf-panneau-agent button.pa-lien:hover label, .qaf-panneau-agent button.pa-lien:focus label {{ color: {k.T1}; }}
-.qaf-panneau-agent button.pa-grand:focus {{ border-color: {k.FILET_FORT}; }}
+.qaf-panneau-agent .qaf-icone.pa-c {{ color: {j.SIGNATURE}; }}
+.qaf-panneau-agent button.pa-rang {{ min-height: {p.LIGNE}px; padding: 0; background-color: transparent;
+    border: none; border-radius: {j.RAYON}px; }}
+.qaf-panneau-agent button.pa-rang:hover, .qaf-panneau-agent button.pa-rang:focus {{ background-color: {k.CHAMP}; }}
+.qaf-panneau-agent button.pa-rang:active {{ background-color: {k.CHOISI}; }}
+.qaf-panneau-agent button.pa-rang:disabled {{ background-color: transparent; }}
+.qaf-panneau-agent button.pa-det {{ min-width: {p.LIGNE}px; min-height: {p.LIGNE}px; padding: 0;
+    background-color: transparent; border: none; border-radius: {j.RAYON}px; }}
+.qaf-panneau-agent button.pa-det .qaf-icone {{ color: {k.T3}; }}
+.qaf-panneau-agent button.pa-det:hover, .qaf-panneau-agent button.pa-det:focus {{ background-color: {k.CHAMP}; }}
+.qaf-panneau-agent button.pa-det:hover .qaf-icone, .qaf-panneau-agent button.pa-det:focus .qaf-icone {{ color: {k.T1}; }}
+.qaf-panneau-agent .pa-rnom {{ font-size: {j.TAILLE_CORPS}px; color: {k.T1}; }}
+.qaf-panneau-agent .pa-rnom.pa-actif {{ font-weight: {j.GRAISSE_ACCENT}; }}
+.qaf-panneau-agent .pa-rnom.pa-eteint {{ color: {k.T3}; }}
+.qaf-panneau-agent .pa-statut {{ font-size: {j.TAILLE_PETITE}px; color: {k.T3}; }}
+.qaf-panneau-agent .pa-statut.pa-ok {{ color: {k.T2}; }}
+.qaf-panneau-agent .pa-statut.pa-actif {{ color: {k.T1}; font-weight: {j.GRAISSE_FORTE}; }}
+.qaf-panneau-agent .pa-statut.pa-danger {{ color: {j.DANGER}; font-weight: {j.GRAISSE_FORTE}; }}
+.qaf-panneau-agent .pa-use {{ font-size: {j.TAILLE_CORPS}px; color: {k.T1}; text-decoration-line: underline; }}
+.qaf-panneau-agent button.pa-rang:disabled .pa-use {{ color: {k.T3}; }}
+.qaf-panneau-agent .pa-echec {{ font-size: {j.TAILLE_CORPS}px; color: {j.DANGER}; }}
+.qaf-panneau-agent .pa-echec.pa-fort {{ font-weight: {j.GRAISSE_FORTE}; }}
+.qaf-panneau-agent button.pa-principal {{ min-height: {p.LIGNE}px; padding: 0 16px; background-color: {j.SIGNATURE};
+    border: none; border-radius: {j.RAYON}px; }}
+.qaf-panneau-agent button.pa-principal:hover, .qaf-panneau-agent button.pa-principal:focus {{
+    background-color: {j.SIGNATURE_SURVOL}; }}
+.qaf-panneau-agent button.pa-principal label {{ font-size: {j.TAILLE_CORPS}px; font-weight: {j.GRAISSE_ACCENT};
+    color: {j.BARRE}; }}
+.qaf-panneau-agent button.pa-contour {{ min-height: {p.LIGNE}px; padding: 0 16px; background-color: transparent;
+    border: 1px solid {k.T2}; border-radius: {j.RAYON}px; }}
+.qaf-panneau-agent button.pa-contour label {{ font-size: {j.TAILLE_CORPS}px; color: {k.T1}; }}
+.qaf-panneau-agent button.pa-contour:hover, .qaf-panneau-agent button.pa-contour:focus {{ border-color: {k.T1};
+    background-color: {k.CHAMP}; }}
+.qaf-panneau-agent button.pa-contour:disabled {{ border-color: {k.FILET}; background-color: transparent; }}
+.qaf-panneau-agent button.pa-contour:disabled label {{ color: {k.T3}; }}
+.qaf-panneau-agent entry.pa-port {{ min-height: 0; padding: 4px 8px; font-size: {j.TAILLE_CORPS}px; color: {k.T1};
+    background-color: {k.CHAMP}; background-image: none; border: 1px solid {k.FILET}; border-radius: {j.RAYON}px;
+    box-shadow: none; caret-color: {j.SIGNATURE}; font-feature-settings: "tnum"; }}
+.qaf-panneau-agent entry.pa-port:focus {{ border-color: {j.SIGNATURE}; }}
+.qaf-panneau-agent entry.pa-port:disabled {{ color: {k.T3}; }}
+.qaf-panneau-agent scrolledwindow.pa-liste overshoot, .qaf-panneau-agent scrolledwindow.pa-liste undershoot {{
+    background: none; border: none; box-shadow: none; }}
+.qaf-panneau-agent scrolledwindow.pa-liste scrollbar {{ background-color: transparent; border: none; }}
+.qaf-panneau-agent scrolledwindow.pa-liste scrollbar slider {{ min-width: 4px; min-height: 24px; margin: 0;
+    border: none; border-radius: 2px; background-color: {k.T3}; }}
 """
 
 
@@ -201,6 +240,18 @@ class Jauge(Gtk.DrawingArea):
         return False
 
 
+def _entree(bouton, ev):
+    """Le survol déplace le curseur unique, s'il y a eu un geste. Un défilement ou une
+    reconstruction glisse aussi une ligne sous un pointeur immobile : GTK annonce alors une
+    entrée, qui volerait le focus du clavier en pleine descente."""
+    carte = bouton.get_toplevel()
+    position = (ev.x_root, ev.y_root)
+    if getattr(carte, "pointeur", None) != position:
+        carte.pointeur = position
+        bouton.grab_focus()
+    return False
+
+
 def _bouton(classe, contenu, rappel, infobulle=None, cle=None):
     b = Gtk.Button()
     b.get_style_context().add_class(classe)
@@ -210,7 +261,7 @@ def _bouton(classe, contenu, rappel, infobulle=None, cle=None):
     if infobulle:
         b.set_tooltip_text(infobulle)
     b.connect("clicked", lambda *_: rappel())
-    b.connect("enter-notify-event", lambda w, _e: w.grab_focus() or False)
+    b.connect("enter-notify-event", _entree)
     b.qaf_cle = cle
     return b
 
@@ -233,6 +284,49 @@ def _tete(panneau, etat, taille):
     return tete
 
 
+def _gouttiere(enfant=None):
+    """Colonne de 36 px : la coche, centrée sous la tête, ou rien. Le nom tombe sous « Agent »."""
+    b = Gtk.Box()
+    b.set_size_request(p.COLONNE, -1)
+    if enfant is not None:
+        enfant.set_margin_start(p.RETRAIT_COCHE)
+        enfant.set_halign(Gtk.Align.START)
+        enfant.set_valign(Gtk.Align.CENTER)
+        b.pack_start(enfant, False, False, 0)
+    return b
+
+
+def _coche():
+    i = c.Icone("coche", taille=p.ICONE_LIGNE)
+    i.get_style_context().add_class("pa-c")
+    return i
+
+
+def _carre(couleur):
+    """Carré du label d'un qube, lu par qubesadmin : repère de dom0, pas du qube. Sans label
+    lisible, T3."""
+    v_label = p.label_de(couleur) if couleur else p.LABEL_DEFAUT
+    rgb = Jauge._rgb(f"#{v_label:06x}" if couleur and v_label != p.LABEL_DEFAUT else k.T3)
+    z = Gtk.DrawingArea()
+    z.set_size_request(p.CARRE, p.CARRE)
+    z.set_valign(Gtk.Align.CENTER)
+    z.set_margin_end(8)
+
+    def dessiner(_w, cr):
+        cr.set_source_rgb(*rgb)
+        cr.rectangle(0, 0, p.CARRE, p.CARRE)
+        cr.fill()
+        return False
+    z.connect("draw", dessiner)
+    return z
+
+
+def _classe(widget, *classes):
+    for nom in classes:
+        widget.get_style_context().add_class(nom)
+    return widget
+
+
 # --- la carte ---------------------------------------------------------------------------------
 
 class Carte(c.SurfaceAF):
@@ -247,6 +341,9 @@ class Carte(c.SurfaceAF):
             getattr(self.boite, f"set_margin_{cote}")(p.MARGE)
         self.add(self.boite)
         self.phrases, self.rang, self.ligne = [], 0, None
+        self.defil, self._vue, self.pointeur = None, object(), _pointeur()
+        self.add_events(Gdk.EventMask.POINTER_MOTION_MASK)
+        self.connect("motion-notify-event", self._mouvement)
         self._minuteries = [GLib.timeout_add(p.ROTATION_MS, self._tourner),
                             GLib.timeout_add_seconds(p.MINUTERIE_DUREES_S, self._a_jour)]
         self.connect("key-press-event", self._clavier)
@@ -257,6 +354,10 @@ class Carte(c.SurfaceAF):
             GLib.source_remove(m)
         self._minuteries = []
 
+    def _mouvement(self, _w, ev):
+        self.pointeur = (ev.x_root, ev.y_root)
+        return False
+
     def _a_jour(self):
         self.remplir()
         return True
@@ -265,6 +366,17 @@ class Carte(c.SurfaceAF):
     # souris déplace aussi) ; Entrée agit, ou rafraîchit si rien n'a le focus ; r
     # rafraîchit ; Échap ferme (SurfaceAF).
     def _clavier(self, _w, ev):
+        if self.panneau.voisin is not None:  # P2 : sur cet écran, le clavier interne seul agit
+            nom = Gdk.keyval_name(ev.keyval) or ""
+            if not palette.frappe_admise(self.panneau.voisin.clavier, nom, appareil(ev)):
+                return True
+            if isinstance(self.get_focus(), Gtk.Entry):
+                return not p.touche_du_port(nom)
+        pas = {Gdk.KEY_j: 1, Gdk.KEY_Down: 1, Gdk.KEY_k: -1, Gdk.KEY_Up: -1}.get(ev.keyval)
+        voisine = self._ligne_voisine(pas) if pas else None
+        if voisine is not None:
+            voisine.grab_focus()
+            return True
         touches = {Gdk.KEY_h: Gtk.DirectionType.LEFT, Gdk.KEY_j: Gtk.DirectionType.DOWN,
                    Gdk.KEY_k: Gtk.DirectionType.UP, Gdk.KEY_l: Gtk.DirectionType.RIGHT}
         if ev.keyval in touches:
@@ -277,6 +389,27 @@ class Carte(c.SurfaceAF):
             self.panneau.rafraichir(force=True)
             return True
         return False
+
+    def _lignes(self):
+        """Un bouton par ligne de la zone défilante, dans l'ordre de lecture."""
+        if self.defil is None:
+            return []
+        lignes = []
+        for w in self.defil.get_child().get_child().get_children():
+            boutons = [w] if isinstance(w, Gtk.Button) else w.get_children() if isinstance(w, Gtk.Box) else []
+            premier = next((b for b in boutons if isinstance(b, Gtk.Button) and b.get_sensitive()), None)
+            if premier is not None:
+                lignes.append(premier)
+        return lignes
+
+    def _ligne_voisine(self, pas):
+        """Ligne au-dessus ou au-dessous du focus, sur toute la liste, visible ou non."""
+        focus, lignes = self.get_focus(), self._lignes()
+        rang = next((i for i, b in enumerate(lignes)
+                     if focus is not None and focus.get_parent() in (b, b.get_parent()) or focus is b), None)
+        if rang is None or not 0 <= rang + pas < len(lignes):
+            return None
+        return lignes[rang + pas]
 
     def _tourner(self):
         if self.ligne is None or len(self.phrases) < 2:
@@ -301,32 +434,43 @@ class Carte(c.SurfaceAF):
 
     # --- construction ------------------------------------------------------------------
     def remplir(self):
+        """Reconstruit la carte seulement si ce qu'elle montre a changé : le tic de 5 s ne doit
+        ni perdre le défilement, ni le survol, ni l'ordre du clavier."""
+        pn = self.panneau
+        vue = pn.empreinte()
+        if vue == self._vue:
+            return
+        self._vue = vue
         focus = getattr(self.get_focus(), "qaf_cle", None)
+        hauteur = self.defil.get_vadjustment().get_value() if self.defil is not None else 0
+        self.defil = None
         for enfant in self.boite.get_children():
             self.boite.remove(enfant)
             enfant.destroy()
-        pn = self.panneau
         maintenant = time.time()
         etat = pn.etat_carte()
         m = pn.derniere
         self.boite.pack_start(self._heros(etat, m), False, False, 0)
         self.boite.pack_start(_filet(), False, False, 0)
-        if etat == "connexion":
+        if etat == "voisin":
+            self._voisin()
+        elif etat == "connexion":
             self._connexion()
         elif etat in ("vide", "ajout"):
             self._fournisseurs(etat)
         else:
-            self._abonnement(etat, m, maintenant)
-            for cle, nom, _ in p.FOURNISSEURS[1:]:
-                if p.etat_fournisseur(m, cle) == "connecte":
-                    self.boite.pack_start(_filet(), False, False, 0)
-                    self.boite.pack_start(self._autre(nom), False, False, 0)
+            self._carte(etat, m, maintenant)
         self.boite.show_all()
         cible = self._chercher(focus) if focus else None
         if cible is not None:
             cible.grab_focus()
         elif self.get_focus() is not None and not self.get_focus().get_mapped():
             self.set_focus(None)
+        if self.defil is not None and hauteur:
+            # Après l'allocation : avant, la nouvelle zone n'a pas encore sa hauteur.
+            defil = self.defil
+            GLib.idle_add(lambda: defil is self.defil and defil.get_vadjustment().set_value(hauteur) and False,
+                          priority=GLib.PRIORITY_LOW)
         self.resize(p.LARGEUR, 1)
         self.panneau.replacer()
 
@@ -342,13 +486,15 @@ class Carte(c.SurfaceAF):
 
     def _heros(self, etat, m):
         pn = self.panneau
-        boite = Gtk.Box(spacing=14)
+        boite = Gtk.Box(spacing=p.COLONNE - p.TETE_HEROS)
         tete = _tete(pn, icones.ARRETE if etat == "arrete" else icones.PRET, p.TETE_HEROS)
         boite.pack_start(tete, False, False, 0)
         textes = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, valign=Gtk.Align.CENTER)
         textes.pack_start(_lab(t("carte.titre"), "pa-titre"), False, False, 0)
-        if etat == "connexion":
-            phrases = [t("carte.heros_connexion", nom=p.NOMS[pn.connexion[0]].upper())]
+        if etat == "voisin":
+            phrases = [t("carte.hero_voisin")]
+        elif etat == "connexion":
+            phrases = [t("carte.heros_connexion", nom=u.nom_fournisseur(pn.connexion[0]).upper())]
         else:
             phrases = u.phrases_heros(m, pn.allume, etat)
         if phrases != self.phrases:
@@ -358,7 +504,7 @@ class Carte(c.SurfaceAF):
         textes.pack_start(self.ligne, False, False, 0)
         boite.pack_start(textes, True, True, 0)
         boutons = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
-        if etat in ("ajout", "connexion"):
+        if etat in ("ajout", "connexion", "voisin"):
             boutons.pack_start(_bouton("pa-carre", c.Icone("fermer"), pn.retour, t("carte.infobulle_retour"),
                                        "retour"), False, False, 0)
         elif etat != "vide":
@@ -369,19 +515,167 @@ class Carte(c.SurfaceAF):
         boite.pack_end(boutons, False, False, 0)
         return boite
 
-    def _entete_fournisseur(self, nom, offre=""):
-        boite = Gtk.Box(spacing=10)
-        boite.pack_start(_tete(self.panneau, icones.PRET, 16), False, False, 0)
-        boite.pack_start(_lab(nom, "pa-nom"), False, False, 0)
-        if offre:
-            boite.pack_end(_lab(offre, "pa-offre"), False, False, 0)
+    def _defilante(self, contenu, maxi):
+        """Zone à hauteur bornée, sans barre sous le texte quand tout tient. Le focus du clavier
+        la fait suivre : une ligne atteinte aux flèches n'est jamais sous le bord."""
+        zone_liste = Gtk.ScrolledWindow()
+        zone_liste.get_style_context().add_class("pa-liste")
+        zone_liste.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        zone_liste.set_propagate_natural_height(True)
+        zone_liste.set_max_content_height(maxi)
+        zone_liste.set_shadow_type(Gtk.ShadowType.NONE)
+        zone_liste.add(contenu)
+        zone_liste.get_child().set_shadow_type(Gtk.ShadowType.NONE)
+        contenu.set_focus_vadjustment(zone_liste.get_vadjustment())
+        self.defil = zone_liste
+        return zone_liste
+
+    def _note(self, texte, *classes):
+        lab = _lab(texte, *(classes or ("pa-note",)))
+        # Largeur fixée à la colonne : sinon un libellé enroulé réclame sa largeur naturelle
+        # et élargit la carte de 412 px.
+        lab.set_line_wrap(True)
+        lab.set_max_width_chars(1)
+        lab.set_size_request(p.CONTENU - p.COLONNE, -1)
+        lab.set_margin_start(p.COLONNE)
+        return lab
+
+    def _texte_statut(self, m, cle, statut):
+        """(texte, classes) à droite d'une ligne."""
+        pn = self.panneau
+        if pn.bascule == cle:
+            return t("carte.bascule"), ("pa-statut", "pa-ok")
+        if statut == "actif":
+            sante = u.sante_affichee(m) if pn.allume else None
+            return (t(sante), ("pa-statut", "pa-danger")) if sante else (t("carte.actif"), ("pa-statut", "pa-actif"))
+        if statut == "connecte" and cle == "local" and pn.regle() is not None:
+            return t("carte.voisin_connecte"), ("pa-statut", "pa-ok")
+        if statut == "connecte":
+            return t("carte.connectee" if cle == "local" else "carte.connecte"), ("pa-statut", "pa-ok")
+        if statut == "connexion_seule":
+            return t("carte.connexion_seule"), ("pa-statut", "pa-ok")
+        return t("carte.non_installe" if statut == "non_installe" else "carte.a_configurer"), ("pa-statut",)
+
+    def _rang(self, cle):
+        """Ligne du « + ». Clic : basculer si elle est activable, sinon ouvrir le terminal. La
+        ligne active n'a pas de survol : elle n'a plus rien à faire."""
+        pn, m = self.panneau, self.panneau.derniere
+        statut, geste = p.statut_ligne(m, cle), p.geste_ligne(m, cle, pn.allume)
+        actif = statut == "actif"
+        interieur = Gtk.Box()
+        interieur.set_size_request(-1, p.LIGNE)
+        interieur.pack_start(_gouttiere(_coche() if actif else None), False, False, 0)
+        nom = _lab(u.nom_fournisseur(cle), "pa-rnom")
+        if actif:
+            nom.get_style_context().add_class("pa-actif")
+        elif geste is None:
+            nom.get_style_context().add_class("pa-eteint")
+        interieur.pack_start(nom, False, False, 0)
+        if cle == "local" and statut == "a_configurer":
+            meta = _lab(t("carte.meta_local"), "pa-statut")
+            meta.set_margin_start(8)
+            interieur.pack_start(meta, False, False, 0)
+        texte, classes = self._texte_statut(m, cle, statut)
+        droite = _lab(texte, *classes, xalign=1.0)
+        droite.set_margin_end(4)
+        interieur.pack_end(droite, False, False, 0)
+        ligne = Gtk.Box()
+        if actif:
+            ligne.pack_start(interieur, True, True, 0)
+        else:
+            bulle = t("carte.bulle_terminal") if geste == "terminal" else None
+            if geste is None and pn.allume:
+                bulle = t("carte.bulle_maj", nom=u.nom_fournisseur(cle))
+            b = _bouton("pa-rang", interieur, lambda k=cle: pn.choisir(k), bulle, f"f-{cle}")
+            b.set_sensitive(geste is not None and pn.bascule is None)
+            ligne.pack_start(b, True, True, 0)
+        if p.icone_terminal(m, cle, pn.allume):
+            ligne.pack_start(_bouton("pa-det", c.Icone("terminal", taille=p.ICONE_LIGNE),
+                                     lambda k=cle: pn.connecter(k), t("carte.bulle_reglages"), f"t-{cle}"),
+                             False, False, 0)
+        else:
+            vide = Gtk.Box()
+            vide.set_size_request(p.LIGNE, p.LIGNE)
+            ligne.pack_start(vide, False, False, 0)
+        return ligne
+
+    def _rang_autre(self, cle):
+        """Carte normale : un autre fournisseur, avec son geste visible en permanence."""
+        pn, m = self.panneau, self.panneau.derniere
+        interieur = Gtk.Box()
+        interieur.set_size_request(-1, p.LIGNE)
+        interieur.pack_start(_gouttiere(), False, False, 0)
+        interieur.pack_start(_lab(u.nom_fournisseur(cle), "pa-rnom"), False, False, 0)
+        meta = _lab(p.meta_fournisseur(m, cle, pn.regle()), "pa-statut")
+        meta.set_margin_start(8)
+        interieur.pack_start(meta, False, False, 0)
+        droite = _lab(t("carte.bascule"), "pa-statut", "pa-ok", xalign=1.0) if pn.bascule == cle \
+            else _lab(t("carte.utiliser"), "pa-use", xalign=1.0)
+        droite.set_margin_end(4)
+        interieur.pack_end(droite, False, False, 0)
+        b = _bouton("pa-rang", interieur, lambda k=cle: pn.choisir(k), None, f"f-{cle}")
+        b.set_sensitive(pn.allume and pn.bascule is None)
+        return b
+
+    def _entete_actif(self, cle, meta, sante=None):
+        boite = Gtk.Box()
+        boite.set_size_request(-1, p.LIGNE)
+        boite.pack_start(_gouttiere(_coche()), False, False, 0)
+        boite.pack_start(_lab(u.nom_fournisseur(cle), "pa-rnom", "pa-actif"), False, False, 0)
+        droite = _lab(t(sante), "pa-statut", "pa-danger", xalign=1.0) if sante else _lab(meta, "pa-statut", xalign=1.0)
+        droite.set_margin_end(4)
+        boite.pack_end(droite, False, False, 0)
         return boite
 
-    def _abonnement(self, etat, m, maintenant):
+    def _carte(self, etat, m, maintenant):
         pn = self.panneau
+        corps = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=p.ECART_CORPS)
+        actif = u.actif_de(m)
+        allume = etat != "arrete"
+        sante = u.sante_affichee(m) if allume else None
+        if actif in ("claude", None):
+            self._abonnement(corps, etat, m, maintenant, sante)
+        else:
+            regle = pn.regle() if actif == "local" else None
+            corps.pack_start(self._entete_actif(actif, p.meta_fournisseur(m, actif, regle), sante), False, False, 0)
+            if not allume:
+                corps.pack_start(self._lien_retrait(t("carte.demarrer"), pn.demarrer, "demarrer"), False, False, 0)
+            elif sante:
+                corps.pack_start(self._lien_retrait(t("carte.rouvrir"), lambda: pn.connecter(actif), "reconnexion",
+                                                    "pa-alerte"), False, False, 0)
+            corps.pack_start(self._note(t(p.note_actif(actif))), False, False, 0)
+            for note in p.notes_voisin(m, regle, pn.voisin_marche):
+                corps.pack_start(self._note(note), False, False, 0)
+        autres = p.utilisables(m)
+        if autres:
+            corps.pack_start(_filet(), False, False, 0)
+            liste = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            for cle in autres:
+                liste.pack_start(self._rang_autre(cle), False, False, 0)
+            corps.pack_start(self._defilante(liste, p.AUTRES_MAX), False, False, 0)
+        self._notes_bascule(corps)
+        self.boite.pack_start(corps, False, False, 0)
+
+    def _lien_retrait(self, texte, rappel, cle, *classes):
+        lien = _lien(texte, rappel, *classes, cle=cle)
+        lien.set_margin_start(p.COLONNE)
+        return lien
+
+    def _notes_bascule(self, boite):
+        pn = self.panneau
+        if pn.bascule_echec:
+            boite.pack_start(self._note(t("carte.note_bascule_echec"), "pa-echec"), False, False, 0)
+        for cle in pn.notes:
+            boite.pack_start(self._note(t(cle)), False, False, 0)
+
+    def _abonnement(self, corps, etat, m, maintenant, sante):
+        """Claude actif, ou rien de lu encore (sans mesure, aucun nom n'est présumé)."""
+        pn = self.panneau
+        if m is not None:
+            e = None if u.probleme(pn.statut)[0] else sante
+            corps.pack_start(self._entete_actif("claude", u.OFFRES.get(m.offre, ""), e), False, False, 0)
         section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=p.ECART_JAUGES)
-        section.pack_start(self._entete_fournisseur("Claude", u.OFFRES.get(m.offre, "") if m else ""),
-                           False, False, 0)
+        section.set_margin_start(p.COLONNE)
         allume = etat != "arrete"
         if not allume:
             section.pack_start(_lien(t("carte.demarrer"), pn.demarrer, cle="demarrer"), False, False, 0)
@@ -394,6 +688,9 @@ class Carte(c.SurfaceAF):
                                    False, False, 0)
             elif texte:
                 section.pack_start(_lab(texte, "pa-note", enrouler=True), False, False, 0)
+            elif sante:
+                section.pack_start(_lien(t("carte.rouvrir"), lambda: pn.connecter("claude"), "pa-alerte",
+                                         cle="reconnexion"), False, False, 0)
         age = None if pn.heure is None else maintenant - pn.heure
         fenetres = u.principales(m) if m is not None and (age is None or age <= u.TROP_VIEUX_S) else []
         if not fenetres and etat != "attente" and (not allume or pn.statut in ("ok", None)):
@@ -409,7 +706,7 @@ class Carte(c.SurfaceAF):
                           [u.pourcent_affiche(trait, maintenant) for trait in u.traits(m, f.nom)])
             jauge.set_margin_end(p.AVANT_DUREE)
             duree = _lab(u.duree(f.remise - maintenant) if f.remise > maintenant else "",
-                         "pa-duree", xalign=1.0, largeur=56)
+                         "pa-duree", xalign=1.0, largeur=p.largeur_duree())
             if gardee:
                 titre.get_style_context().add_class("pa-gardee")
                 duree.get_style_context().add_class("pa-gardee")
@@ -427,56 +724,202 @@ class Carte(c.SurfaceAF):
             ligne.set_hexpand(True)
         if fenetres:
             section.pack_start(grille, False, False, 0)
-        self.boite.pack_start(section, False, False, 0)
-
-    def _autre(self, nom):
-        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=p.ECART_JAUGES)
-        section.pack_start(self._entete_fournisseur(nom), False, False, 0)
-        section.pack_start(_lab(t("carte.sans_mesure"), "pa-note"), False, False, 0)
-        return section
+        corps.pack_start(section, False, False, 0)
 
     def _fournisseurs(self, etat):
-        pn = self.panneau
-        self.boite.pack_start(_lab(t("carte.intro_vide") if etat == "vide" else t("carte.intro_ajout"), "pa-texte",
-                                   enrouler=True), False, False, 0)
-        rangee = Gtk.Box(spacing=p.ECART_FOURNISSEURS, homogeneous=True)
-        for cle, nom, commande in p.FOURNISSEURS:
-            e = p.etat_fournisseur(pn.derniere, cle)
-            contenu = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-            contenu.pack_start(c.TeteAgent(icones.PRET, taille=32), False, False, 0)
-            contenu.pack_start(_lab(nom, xalign=0.5), False, False, 0)
-            note = {"connecte": t("carte.connecte"), "non_installe": t("carte.non_installe")}.get(e, "")
-            contenu.pack_start(_lab(note or " ", "pa-note", xalign=0.5), False, False, 0)
-            b = _bouton("pa-grand", contenu, lambda k=cle: pn.connecter(k),
-                        t("carte.bulle_terminal", commande=commande)
-                        if e != "non_installe" else t("carte.bulle_absent", nom=nom), f"f-{cle}")
-            b.set_sensitive(e != "non_installe")
-            rangee.pack_start(b, True, True, 0)
-        self.boite.pack_start(rangee, False, False, 0)
+        corps = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=p.ECART_CORPS)
+        if etat == "vide":
+            corps.pack_start(_lab(t("carte.intro_vide"), "pa-texte", enrouler=True), False, False, 0)
+        liste = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        for rang, (cle_titre, ids) in enumerate(p.SECTIONS):
+            titre = _lab(t(cle_titre), "pa-section")
+            titre.set_size_request(-1, p.SECTION)
+            titre.set_margin_start(p.COLONNE)
+            if rang:
+                titre.set_margin_top(p.ECART_CORPS)
+            liste.pack_start(titre, False, False, 0)
+            for cle in ids:
+                liste.pack_start(self._rang(cle), False, False, 0)
+        # Toujours là, sys-agent éteint compris : l'autorisation se retire sans lui.
+        liste.pack_start(self._lien_voisin(), False, False, 0)
+        corps.pack_start(self._defilante(liste, p.LISTE_MAX), False, False, 0)
+        self._notes_bascule(corps)
+        corps.pack_start(self._note(t("carte.note_saisie")), False, False, 0)
+        self.boite.pack_start(corps, False, False, 0)
 
     def _connexion(self):
         pn = self.panneau
         cle = pn.connexion[0]
-        commande = dict((k, cmd) for k, _n, cmd in p.FOURNISSEURS)[cle]
-        self.boite.pack_start(_lab(t("carte.terminal_ouvert"), "pa-fort"), False, False, 0)
-        etapes = Gtk.Grid(column_spacing=12, row_spacing=10)
-        lignes = ((commande, t("carte.etape_lien")),
-                  (None, t("carte.etape_finir")),
-                  (None, t("carte.etape_mesure") if cle == "claude" else t("carte.etape_voit")))
-        for i, (code, texte) in enumerate(lignes):
-            etapes.attach(_lab(str(i + 1), "pa-num"), 0, i, 1, 1)
-            boite = Gtk.Box()
-            if code:
-                boite.pack_start(_lab(code, "pa-code"), False, False, 0)
-            boite.pack_start(_lab(texte, "pa-texte", enrouler=True), False, False, 0)
-            etapes.attach(boite, 1, i, 1, 1)
-        self.boite.pack_start(etapes, False, False, 0)
-        self.boite.pack_start(_lien(t("carte.rouvrir"), lambda: pn.connecter(cle), cle="rouvrir"), False, False, 0)
+        ecran = p.ecran_connexion(pn.derniere)
+        corps = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=p.ECART_CORPS)
+        if ecran == "attente":
+            etapes = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            for i, texte in enumerate(p.etapes_connexion(cle)):
+                ligne = Gtk.Box()
+                ligne.set_size_request(-1, 24)
+                numero = _lab(str(i + 1), "pa-num")
+                numero.set_size_request(p.COLONNE, -1)
+                numero.set_margin_start(p.RETRAIT_COCHE)
+                ligne.pack_start(numero, False, False, 0)
+                ligne.pack_start(_lab(t(texte), "pa-texte"), False, False, 0)
+                etapes.pack_start(ligne, False, False, 0)
+            corps.pack_start(etapes, False, False, 0)
+            corps.pack_start(self._note(t("carte.note_cnx")), False, False, 0)
+        elif ecran == "echec":
+            corps.pack_start(self._note(t("carte.echec"), "pa-echec", "pa-fort"), False, False, 0)
+            corps.pack_start(self._note(t("carte.note_echec")), False, False, 0)
+        else:
+            self._pret(corps, cle)
+        corps.pack_start(self._lien_retrait(t("carte.rouvrir"), lambda: pn.connecter(cle), "rouvrir"), False, False, 0)
+        if cle == "local":
+            corps.pack_start(self._lien_voisin(), False, False, 0)
+        self.boite.pack_start(corps, False, False, 0)
+
+    def _lien_voisin(self):
+        return self._lien_retrait(t("carte.lien_voisin"), self.panneau.ouvrir_voisin, "voisin")
+
+    def _voisin(self):
+        """Direction A-liste : une liste, un champ, un bouton en contour (jamais plein, jamais
+        par défaut). Ouvrir un port à sys-agent n'est pas le geste que la carte met en avant."""
+        e = self.panneau.voisin
+        corps = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=p.ECART_CORPS)
+        if e.regle is not None:
+            self._voisin_autorise(corps, e)
+        else:
+            self._voisin_choix(corps, e)
+        if e.message:
+            corps.pack_start(self._note(e.message, "pa-echec"), False, False, 0)
+        self.boite.pack_start(corps, False, False, 0)
+
+    def _voisin_autorise(self, corps, e):
+        q = e.qube(e.regle.qube)
+        ligne = Gtk.Box()
+        ligne.set_size_request(-1, p.LIGNE)
+        ligne.pack_start(_gouttiere(_coche()), False, False, 0)
+        ligne.pack_start(_carre(q.couleur if q else None), False, False, 0)
+        ligne.pack_start(_lab(t("carte.autorise", qube=e.regle.qube, port=e.regle.port), "pa-rnom", "pa-actif"),
+                         False, False, 0)
+        if q is not None:
+            marche = self.panneau.voisin_marche  # relu à chaque sondage ; la liste date de l'ouverture
+            etat = _lab(t("carte.en_marche" if (q.en_marche if marche is None else marche) else "carte.eteint"),
+                        "pa-statut", xalign=1.0)
+            etat.set_margin_end(4)
+            ligne.pack_end(etat, False, False, 0)
+        corps.pack_start(ligne, False, False, 0)
+        retirer = self._lien_retrait(t("carte.retirer"), self.panneau.voisin_retirer, "retirer")
+        retirer.set_sensitive(not e.en_cours)
+        corps.pack_start(retirer, False, False, 0)
+        corps.pack_start(self._note(t("carte.note_voisin")), False, False, 0)
+        corps.pack_start(self._note(t("carte.voisin_une_seule")), False, False, 0)
+
+    def _voisin_choix(self, corps, e):
+        pn = self.panneau
+        titre = _lab(t("carte.sec_voisin"), "pa-section")
+        titre.set_size_request(-1, p.SECTION)
+        titre.set_margin_start(p.COLONNE)
+        corps.pack_start(titre, False, False, 0)
+        if e.qubes is None:
+            corps.pack_start(self._note(t("carte.voisin_lecture")), False, False, 0)
+        elif e.qubes is False:
+            corps.pack_start(self._note(t("carte.voisin_illisible"), "pa-echec"), False, False, 0)
+        elif not e.qubes:
+            corps.pack_start(self._note(t("carte.voisin_aucun")), False, False, 0)
+        else:
+            liste = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            for q in e.qubes:
+                liste.pack_start(self._rang_qube(q, q.nom == e.choix), False, False, 0)
+            corps.pack_start(self._defilante(liste, p.VOISINS_MAX), False, False, 0)
+        ligne = Gtk.Box()
+        ligne.pack_start(_gouttiere(), False, False, 0)
+        ligne.pack_start(_lab(t("carte.port"), "pa-rnom"), False, False, 0)
+        champ = self._champ_port(e)
+        champ.set_margin_start(12)
+        ligne.pack_start(champ, False, False, 0)
+        corps.pack_start(ligne, False, False, 0)
+        if e.clavier.ok:
+            corps.pack_start(self._note(t("carte.voisin_port_aide")), False, False, 0)
+        else:
+            corps.pack_start(self._note(t("pal.saisie_impossible", raison=e.clavier.raison), "pa-echec"), False, False, 0)
+        corps.pack_start(self._note(t("carte.note_voisin"), "pa-texte"), False, False, 0)
+        self.b_autoriser = _bouton("pa-contour", _lab(t("carte.autoriser"), xalign=0.5), pn.voisin_autoriser, None,
+                                   "autoriser")
+        self.b_autoriser.set_halign(Gtk.Align.START)
+        self.b_autoriser.set_margin_start(p.COLONNE)
+        self.b_autoriser.set_sensitive(e.autorisable())
+        corps.pack_start(self.b_autoriser, False, False, 0)
+
+    def _rang_qube(self, q, choisi):
+        interieur = Gtk.Box()
+        interieur.set_size_request(-1, p.LIGNE)
+        interieur.pack_start(_gouttiere(_coche() if choisi else None), False, False, 0)
+        interieur.pack_start(_carre(q.couleur), False, False, 0)
+        nom = _lab(q.nom, "pa-rnom")  # texte brut : un nom de qube n'est jamais du balisage
+        if choisi:
+            nom.get_style_context().add_class("pa-actif")
+        interieur.pack_start(nom, False, False, 0)
+        etat = _lab(t("carte.en_marche" if q.en_marche else "carte.eteint"), "pa-statut", xalign=1.0)
+        etat.set_margin_end(14)  # la barre de défilement passe par-dessus la marge, pas par-dessus l'état
+        interieur.pack_end(etat, False, False, 0)
+        return _bouton("pa-rang", interieur, lambda n=q.nom: self.panneau.voisin_choisir(n), None, f"v-{q.nom}")
+
+    def _champ_port(self, e):
+        """P2, comme la palette : ni collage, ni clic du milieu, ni glisser-déposer. Les touches
+        sont filtrées par _clavier. Vide au départ : un port présent a été tapé ici."""
+        champ = Gtk.Entry()
+        champ.get_style_context().add_class("pa-port")
+        champ.set_max_length(5)
+        champ.set_width_chars(7)
+        champ.set_placeholder_text(p.PORT_EXEMPLE)
+        champ.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        champ.set_text(e.port)
+        champ.set_sensitive(e.clavier.ok and not e.en_cours)
+        champ.set_tooltip_text(t("carte.voisin_port_aide"))
+        champ.connect("paste-clipboard", lambda w: w.stop_emission_by_name("paste-clipboard"))
+        champ.connect("button-press-event", lambda _w, ev: ev.button != 1)
+        champ.drag_dest_unset()
+        champ.connect("changed", self._port_change)
+        champ.qaf_cle = "port"
+        return champ
+
+    def _port_change(self, champ):
+        e = self.panneau.voisin
+        if e is None:
+            return
+        if not champ.get_text().isascii() or not champ.get_text().isdigit() and champ.get_text():
+            champ.set_text("")  # filet : rien d'autre que des chiffres ne reste jamais ici
+            return
+        e.port = champ.get_text()
+        self.b_autoriser.set_sensitive(e.autorisable())
+
+    def _pret(self, corps, cle):
+        """Test réussi : le consentement de la première activation. La phrase dit qui verra tout
+        ce que lit l'agent ; seul « Utiliser » bascule, l'assistant n'active rien."""
+        pn, m = self.panneau, self.panneau.derniere
+        corps.pack_start(self._note(p.titre_pret(cle), "pa-fort"), False, False, 0)
+        if u.actif_de(m) == cle:
+            return
+        if not p.activable(m, cle):
+            corps.pack_start(self._note(t("carte.pret_seule")), False, False, 0)
+            return
+        corps.pack_start(self._note(p.phrase_pret(cle), "pa-texte"), False, False, 0)
+        b = _bouton("pa-principal", _lab(t("carte.utiliser"), xalign=0.5), lambda: pn.basculer(cle), None, "utiliser")
+        b.set_halign(Gtk.Align.START)
+        b.set_margin_start(p.COLONNE)
+        b.set_sensitive(pn.allume)
+        corps.pack_start(b, False, False, 0)
 
 
 # --- le panneau (icône, mesure, gestes) ---------------------------------------------------
 
 class Panneau:
+    bascule = None            # id en cours de bascule : la coche ne bouge qu'à la réponse
+    bascule_echec = False
+    heure_bascule = 0.0       # une mesure partie avant cette heure ne dit pas le nouvel actif
+    notes = ()                # clés de texte après une bascule, jusqu'à la fermeture de la carte
+    voisin = None             # p.EcranVoisin tant que cet écran est ouvert
+    voisin_marche = None      # état réel du qube autorisé, lu dans dom0 (None : pas de règle)
+    agents_avant = ()         # ids activables à l'ouverture du terminal de connexion
+
     def __init__(self, publier=True):
         self.allume = False
         self.derniere, self.heure = u.cache_lire()
@@ -503,7 +946,11 @@ class Panneau:
 
     # --- état et mesure (fil de fond) ---------------------------------------------------
     def etat_carte(self):
-        return p.etat_carte(self.allume, self.derniere, self.statut, self.ajout, self.connexion)
+        return p.etat_carte(self.allume, self.derniere, self.statut, self.ajout, self.connexion,
+                            self.voisin is not None)
+
+    def regle(self):
+        return v.lire_regle()
 
     def _poser_label(self, label):
         if label != self.label:
@@ -519,10 +966,11 @@ class Panneau:
                              attention_images=self.images["alerte"] if cle == "alerte" else [])
 
     def _tic(self):
-        if self.connexion and time.time() - self.connexion[1] > p.CONNEXION_MAX_S:
+        attente = bool(self.connexion) and p.ecran_connexion(self.derniere) == "attente"
+        if attente and time.time() - self.connexion[1] > p.CONNEXION_MAX_S:
             self.connexion = None
             self._redessiner()
-        self.rafraichir(force=bool(self.connexion))
+        self.rafraichir(force=attente)
         return True
 
     def rafraichir(self, force=False):
@@ -543,6 +991,8 @@ class Panneau:
         label = None
         if maintenant - self.label_lu >= LABEL_RELU_S:  # le label change rarement : relu chaque minute
             self.label_lu, label = maintenant, lire_label()
+        regle = self.regle()
+        self.voisin_marche = v.marche(regle.qube) if regle is not None else None
         mesure, code, appel = None, None, False
         liante = u.fenetre_liante(self.derniere, maintenant)
         if allume and (not self.allume or u.doit_mesurer(
@@ -564,6 +1014,7 @@ class Panneau:
                 allume = False  # --no-autostart : sys-agent s'est éteint entre-temps
         self.allume = allume
         if mesure is not None:
+            mesure = self._sans_passe(mesure, maintenant)
             self.statut = mesure.etat
             self.reessai = u.REESSAI_LIMITE_S if mesure.etat == "limite" else None
             if mesure.etat == "ok":
@@ -572,11 +1023,13 @@ class Panneau:
             elif self.derniere is not None:
                 self.derniere = dataclasses.replace(
                     self.derniere, totaux=mesure.totaux or self.derniere.totaux,
-                    fournisseurs=mesure.fournisseurs or self.derniere.fournisseurs)
+                    fournisseurs=mesure.fournisseurs or self.derniere.fournisseurs,
+                    v=mesure.v, actif=mesure.actif, sante=mesure.sante, connexion=mesure.connexion,
+                    agents=mesure.agents)
             else:
                 self.derniere = dataclasses.replace(mesure, fenetres=())
-            if self.connexion and p.etat_fournisseur(self.derniere, self.connexion[0]) == "connecte" \
-                    and (self.connexion[0] != "claude" or mesure.etat == "ok"):
+            if self.connexion and (p.connexion_finie_v1(self.derniere, self.connexion[0], mesure.etat)
+                                   or p.connexion_retiree(self.derniere, self.connexion[0], self.agents_avant)):
                 self.connexion = None
         elif appel and allume:
             self.statut = "erreur"
@@ -586,6 +1039,26 @@ class Panneau:
             self.forcer = False
             self.rafraichir(force=True)
         return False
+
+    def _sans_passe(self, mesure, maintenant):
+        """Une mesure partie avant un geste ne le défait pas : ni l'ancien actif après une bascule,
+        ni l'ancien résultat d'assistant juste après l'ouverture du terminal."""
+        changes = {}
+        if self.connexion and maintenant <= self.connexion[1] + p.CONNEXION_MARGE_S:
+            changes["connexion"] = ""
+        if maintenant <= self.heure_bascule and self.derniere is not None:
+            changes["actif"] = self.derniere.actif
+        return dataclasses.replace(mesure, **changes) if changes else mesure
+
+    def empreinte(self):
+        """Ce que la carte montre. Les durées changent à la minute, seulement sur l'écran des
+        jauges : sur la liste, rien ne reconstruit sans raison."""
+        etat = self.etat_carte()
+        if etat == "voisin":  # ni la mesure ni les 30 s des durées : le champ de port y survit
+            return etat, self.voisin.vue(), self.voisin_marche
+        minute = int(time.time() // 60) if etat in ("mesure", "arrete") else 0
+        return (etat, self.allume, self.statut, self.derniere, self.connexion, self.bascule, self.bascule_echec,
+                self.notes, minute, self.voisin_marche)
 
     def _redessiner(self):
         if self.carte is not None:
@@ -599,7 +1072,7 @@ class Panneau:
         self.ouvrir_carte(x, y, saisir)
 
     def ouvrir_carte(self, x, y, saisir=True):
-        self.ajout = False
+        self.ajout, self.bascule_echec, self.notes, self.voisin = False, False, (), None
         self.position = (x, y)
         self.carte = Carte(self, saisir)
         self.carte.remplir()
@@ -624,7 +1097,7 @@ class Panneau:
             carte, self.carte = self.carte, None
             carte.relacher()
             carte.destroy()
-        self.ajout = False
+        self.ajout, self.voisin = False, None
 
     # --- gestes ------------------------------------------------------------------
     def _lancer(self, argv):
@@ -643,15 +1116,118 @@ class Panneau:
         self._redessiner()
 
     def retour(self):
-        self.ajout, self.connexion = False, None
+        if self.voisin is not None:  # retour à l'écran d'où l'on vient
+            self.voisin = None
+        else:
+            self.ajout, self.connexion = False, None
         self._redessiner()
 
+    # --- qube voisin : gestes de dom0, à argv fixe, hors du fil GTK ------------------------
+    def ouvrir_voisin(self):
+        e = self.voisin = p.EcranVoisin(confirmation.clavier_systeme(), self.regle())
+        self._redessiner()
+
+        def lire():
+            GLib.idle_add(self._voisin_liste, e, v.lister())
+        threading.Thread(target=lire, daemon=True).start()
+
+    def _voisin_liste(self, e, qubes):
+        e.qubes = False if qubes is None else tuple(qubes)
+        if self.voisin is e:
+            self._redessiner()
+        return False
+
+    def voisin_choisir(self, nom):
+        e = self.voisin
+        if e is not None and not e.en_cours and e.qube(nom) is not None:
+            e.choix, e.message = nom, ""
+            self._redessiner()
+
+    def _voisin_geste(self, e, action, *args, echec):
+        e.en_cours, e.message = True, ""
+        self._redessiner()
+
+        def travail():
+            GLib.idle_add(self._voisin_fin, e, v.lancer(action, *args), echec)
+        threading.Thread(target=travail, daemon=True).start()
+
+    def _voisin_fin(self, e, reussi, echec):
+        e.en_cours, e.regle, e.port = False, self.regle(), ""
+        e.message = "" if reussi else t(echec)
+        if self.voisin is e:
+            self._redessiner()
+        self.rafraichir()
+        return False
+
+    def voisin_autoriser(self):
+        e = self.voisin
+        if e is None or not e.autorisable():
+            return
+        refus = palette.envoi_admis(e.clavier, confirmation.clavier_systeme)  # périphériques relus, comme la palette
+        if refus:
+            e.message = refus
+            self._redessiner()
+            return
+        self._voisin_geste(e, "autoriser", e.choix, e.port, echec="carte.voisin_refus")
+
+    def voisin_retirer(self):
+        e = self.voisin
+        if e is not None and not e.en_cours and e.regle is not None:
+            self._voisin_geste(e, "retirer", echec="carte.voisin_retrait_echec")
+
     def connecter(self, fournisseur):
-        if p.etat_fournisseur(self.derniere, fournisseur) == "non_installe":
+        if not self.allume or not p.connectable(self.derniere, fournisseur):
             return
         if self._lancer(p.argv_connexion(fournisseur)):
+            if self.derniere is not None:  # l'ancien résultat, effacé là-bas, ne s'affiche pas ici
+                self.derniere = dataclasses.replace(self.derniere, connexion="")
+                self.agents_avant = self.derniere.agents
             self.ajout, self.connexion = False, (fournisseur, time.time())
             self._redessiner()
+
+    def choisir(self, cle):
+        geste = p.geste_ligne(self.derniere, cle, self.allume)
+        if geste == "basculer":
+            self.basculer(cle)
+        elif geste == "terminal":
+            self.connecter(cle)
+
+    def basculer(self, cle):
+        if self.bascule is not None or not self.allume or not p.activable(self.derniere, cle):
+            return
+        self.bascule, self.bascule_echec, self.notes, self.connexion = cle, False, (), None
+        self._redessiner()
+        threading.Thread(target=self._bascule_fil, args=(cle,), daemon=True).start()
+
+    def _bascule_fil(self, cle):
+        reussi = u.basculer(cle)
+        GLib.idle_add(self._bascule_fin, cle, reussi, reussi and self._console_ouverte())
+
+    def _bascule_fin(self, cle, reussi, console):
+        self.bascule = None
+        if reussi and self.derniere is not None:
+            self.derniere = dataclasses.replace(self.derniere, actif=cle, sante="inconnue")
+            self.heure_bascule = time.time()
+            self.notes = p.notes_bascule(cle, console)
+            self._apparence()
+        else:
+            self.bascule_echec = True
+        self._redessiner()
+        self.rafraichir(force=True)
+        return False
+
+    def _console_ouverte(self):
+        """La fenêtre « Agent » existe-t-elle ? Sans réponse de X, on suppose que oui : la note
+        en trop ne coûte rien, celle qui manque ferait croire à la bascule d'une console."""
+        try:
+            from qaf_ui import x11
+            aff = x11.Affichage()
+        except OSError:
+            return True
+        try:
+            return p.fenetre_agent(aff) is not None
+        finally:
+            aff.fermer()
 
     def console(self):
         self.fermer_carte()
@@ -730,23 +1306,53 @@ def lancer():
 
 # --- scènes de rendu hors écran (tools/rendu-ui.sh, jamais installé autrement) ------------------
 
-def _scene(etat, allume=True):
+def _mesure_scene(etat="mesure", actif="claude", fournisseurs=None, agents=None, sante="ok", connexion="", v=2):
     maintenant = int(time.time())
-    m = u.Mesure("ok", "max_20x", (
-        u.Fenetre("5h", "", 93 if etat == "limite" else 34, maintenant + 2 * 3600 + 14 * 60),
-        u.Fenetre("semaine", "", 61, maintenant + 3 * 86400 + 7 * 3600),
-        u.Fenetre("semaine", "fable", 20, maintenant + 3 * 86400 + 7 * 3600)),
-        u.Totaux(812000, 4200000, 23, 3, "opus", 1, False),
-        (("codex", "connecte" if etat == "ajout" else "deconnecte"), ("grok", "non_installe")))
+    fenetres = (u.Fenetre("5h", "", 93 if etat == "limite" else 34, maintenant + 2 * 3600 + 14 * 60),
+                u.Fenetre("semaine", "", 61, maintenant + 3 * 86400 + 7 * 3600),
+                u.Fenetre("semaine", "fable", 20, maintenant + 3 * 86400 + 7 * 3600))
+    if fournisseurs is None:
+        fournisseurs = (("codex", "connecte"), ("grok", "non_installe"), ("grokbot", "connexion_seule"),
+                        ("agy", "connecte"), ("kimi", "non_installe"), ("zai", "deconnecte"),
+                        ("openrouter", "connecte"), ("local", "connecte"))
+    if agents is None:
+        agents = ("claude", "agy", "openrouter", "local")
+    return u.Mesure("sans_jeton" if etat == "vide" else "ok", "max_20x", () if etat == "vide" else fenetres,
+                    u.Totaux(812000, 4200000, 23, 3, "opus", 1, False), fournisseurs, v, actif, sante, connexion,
+                    agents)
+
+
+def _scene(etat, allume=True, statut=None, connexion=None, connexion_resultat="", **mesure):
+    maintenant = int(time.time())
+    m = mesure.pop("m", None) or _mesure_scene(etat, connexion=connexion_resultat, **mesure)
     pn = Panneau.__new__(Panneau)
     pn.allume, pn.derniere, pn.heure = allume, m, maintenant - (3 * 3600 if not allume else 60)
-    pn.statut = "sans_jeton" if etat == "vide" else "ok"
-    pn.ajout, pn.connexion = etat == "ajout", ("claude", maintenant) if etat == "connexion" else None
-    pn.carte, pn.position, pn.en_cours = None, (900, 860), False
-    pn.rafraichir = lambda force=False: None
+    pn.statut = statut or ("sans_jeton" if etat == "vide" else "ok")
+    pn.ajout, pn.connexion = etat == "ajout", (connexion, maintenant) if connexion else None
+    pn.carte, pn.position, pn.en_cours, pn.forcer = None, (900, 860), False, False
+    pn.rafraichir = pn._apparence = lambda force=False: None
     carte = Carte(pn, saisir=False)
     pn.carte = carte
     carte.remplir()
+    return carte
+
+
+def _avec(carte, **attributs):
+    """Pose un état de la bascule, puis reconstruit."""
+    for nom, valeur in attributs.items():
+        setattr(carte.panneau, nom, valeur)
+    carte.remplir()
+    return carte
+
+
+def _defiler(carte, position):
+    """La liste descendue, une fois allouée (rendu seulement)."""
+    GLib.timeout_add(60, lambda: carte.defil.get_vadjustment().set_value(position) and False)
+    return carte
+
+
+def _survoler(carte, cle):
+    carte._chercher(cle).set_state_flags(Gtk.StateFlags.PRELIGHT, False)
     return carte
 
 
@@ -771,4 +1377,164 @@ def scene_ajout():
 
 
 def scene_connexion():
-    return _scene("connexion")
+    return _scene("mesure", connexion="claude")
+
+
+def scene_plus_vierge():
+    return _scene("ajout", fournisseurs=(("grok", "non_installe"), ("grokbot", "connexion_seule")), agents=("claude",))
+
+
+def scene_plus_configure():
+    return _scene("ajout")
+
+
+def scene_plus_bas():
+    return _defiler(_scene("ajout"), 1000)
+
+
+def scene_plus_survol():
+    return _survoler(_scene("ajout"), "f-codex")
+
+
+def scene_plus_survol_terminal():
+    return _survoler(_scene("ajout"), "t-agy")
+
+
+def scene_plus_tiers_actif():
+    return _defiler(_scene("ajout", actif="openrouter"), 1000)
+
+
+def scene_plus_arrete():
+    return _scene("ajout", allume=False)
+
+
+def scene_plus_v1():
+    return _scene("ajout", m=dataclasses.replace(_mesure_scene(), v=1, actif="claude", agents=(),
+                                                 fournisseurs=(("codex", "connecte"), ("grok", "non_installe"))))
+
+
+def scene_carte_claude():
+    return _scene("mesure")
+
+
+def scene_carte_openrouter():
+    return _scene("mesure", actif="openrouter")
+
+
+def scene_carte_local():
+    return _scene("mesure", actif="local")
+
+
+def scene_carte_google():
+    return _scene("mesure", actif="agy")
+
+
+def scene_carte_tiers_arrete():
+    return _scene("arrete", allume=False, actif="openrouter")
+
+
+def scene_carte_sans_compte_claude():
+    return _scene("vide", actif="openrouter")
+
+
+def scene_carte_nombreux():
+    tous = tuple((cle, "connecte") for cle in u.FOURNISSEURS if cle != "grokbot")
+    return _scene("mesure", fournisseurs=tous, agents=tuple(k for k in u.IDS if k != "grokbot"))
+
+
+def scene_sante_cle():
+    return _scene("mesure", actif="openrouter", sante="cle_refusee")
+
+
+def scene_sante_credit():
+    return _scene("mesure", actif="openrouter", sante="credit_epuise")
+
+
+def scene_sante_injoignable():
+    return _scene("mesure", actif="local", sante="injoignable")
+
+
+def scene_bascule_en_cours():
+    return _avec(_scene("mesure"), bascule="openrouter")
+
+
+def scene_bascule_faite():
+    return _avec(_scene("mesure", actif="agy"), notes=p.notes_bascule("agy", True))
+
+
+def scene_bascule_echec():
+    return _avec(_scene("mesure"), bascule_echec=True)
+
+
+def scene_connexion_cle():
+    return _scene("mesure", connexion="openrouter")
+
+
+def scene_connexion_abonnement():
+    return _scene("mesure", connexion="codex")
+
+
+def scene_connexion_local():
+    return _scene("mesure", connexion="local")
+
+
+def scene_connexion_echec():
+    return _scene("mesure", connexion="openrouter", connexion_resultat="echec")
+
+
+def scene_pret_tiers():
+    return _scene("mesure", connexion="openrouter", connexion_resultat="ok")
+
+
+def scene_pret_local():
+    return _scene("mesure", connexion="local", connexion_resultat="ok")
+
+
+def scene_pret_seule():
+    return _scene("mesure", connexion="grokbot", connexion_resultat="ok")
+
+
+class _ClavierScene:
+    ok, raison = True, ""
+
+
+_QUBES_SCENE = (v.Qube("gpu", "StandaloneVM", "0xcc0000", False), v.Qube("ia-locale", "AppVM", "0x3465a4", True),
+                v.Qube("personal", "AppVM", "0xf5c211", False), v.Qube("work", "AppVM", "0x4e9a06", True))
+
+
+def _scene_voisin(regle=None, choix=None, port="", qubes=_QUBES_SCENE, clavier=_ClavierScene, message=""):
+    carte = _scene("mesure", connexion="local")
+    e = p.EcranVoisin(clavier, regle)
+    e.qubes, e.choix, e.port, e.message = qubes, choix, port, message
+    carte.panneau.voisin = e
+    carte.remplir()
+    return carte
+
+
+def scene_voisin_choix():
+    return _scene_voisin(choix="ia-locale", port="11434")
+
+
+def scene_voisin_vide():
+    return _scene_voisin()
+
+
+def scene_voisin_autorise():
+    return _scene_voisin(regle=v.Regle("ia-locale", 11434))
+
+
+def scene_voisin_aucun():
+    return _scene_voisin(qubes=())
+
+
+def scene_voisin_refus():
+    return _scene_voisin(choix="work", port="8080", message=t("carte.voisin_refus"))
+
+
+def scene_carte_local_voisin():
+    carte = _scene("mesure", actif="local", sante="inconnue")
+    carte.panneau.regle = lambda: v.Regle("ia-locale", 11434)
+    carte.panneau.voisin_marche = False
+    carte._vue = None
+    carte.remplir()
+    return carte

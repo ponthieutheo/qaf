@@ -22,6 +22,7 @@ QAF 是 [Qubes OS](https://www.qubes-os.org/) 4.3 之上的一层扩展。你用
 - [思路](#思路)
 - [截图](#截图)
 - [架构](#架构)
+- [智能体服务商](#智能体服务商)
 - [安全](#安全)
 - [安装](#安装)
 - [项目状态](#项目状态)
@@ -73,7 +74,22 @@ QAF 是 [Qubes OS](https://www.qubes-os.org/) 4.3 之上的一层扩展。你用
 | `policy/` | dom0 | 随附的 qrexec 策略（我们自己的文件，排在 Qubes 的文件之前）。 |
 | `tools/qaf-installer` | dom0 | 一条命令把全新的 Qubes 4.3 变成 QAF，`--retour` 则把一切移除。 |
 
-目前的智能体是 **Claude Code**，固定版本，安装在模板 `tpl-agent` 中。接口约定（一个 MCP 服务器和一个 skill）也为其他 CLI 预留。
+默认智能体是 **Claude Code**，固定版本，安装在模板 `tpl-agent` 中。同一时间只运行一个智能体：在智能体卡片中从 35 个服务商里选择（Omarchy 面板和启动器的完整列表），可以是按需安装到 sys-agent 的 CLI、API 密钥或本地 AI。QAF 绝不会在没有批准的情况下运行它们：不会询问的 CLI 只能登录。目前投入使用的只有 Claude。OpenRouter 已用真实密钥完成过一个真实计划。来自启动器的 12 个 CLI 只在假模型上运行过，没有使用账号：各服务商的状态见 [docs/FOURNISSEURS.md](docs/FOURNISSEURS.md)（法语）。
+
+## 智能体服务商
+
+任务栏中的智能体卡片提供 35 个服务商，即 Omarchy 的完整列表。由你选择，同一时间只运行一个智能体，默认仍是 Claude Code。Doorman 对所有服务商执行同样的规则。
+
+| 连接方式 | 数量 | 服务商 |
+|---|---:|---|
+| CLI，按需安装到 sys-agent | 20 | Claude Code, Codex, Grok Build, Kimi Code, Cursor, GitHub Copilot, Muse Code, Google (Antigravity CLI), Kimchi, Hermes, Devin, Mistral Vibe, Qwen Code, OpenCode, Oh My Pi, Crush, OpenClaw, DeepSeek Harness, Kilo, Command Code |
+| API 密钥 | 7 | Z.ai, Ollama Cloud, MiniMax, OpenRouter, DeepSeek, Fireworks, Synthetic |
+| 本地 AI | 1 | 兼容 Anthropic 的服务器（Ollama、LM Studio……），在你自己的机器上或另一个 qube 中 |
+| 仅登录，不能成为智能体 | 7 | Grok Bot, Pi, Ori, MiniMax Code, Kiro CLI, Freebuff, Amp |
+
+“仅登录”指批准机制缺失或尚未验证的 CLI：QAF 绝不会以“全部放行”模式运行智能体。
+
+**验证程度。** 目前投入使用的只有 Claude Code。OpenRouter 已用真实密钥完成过一个真实计划。其他大多数服务商从未用真实账号使用过：各服务商的详情见 [docs/FOURNISSEURS.md](docs/FOURNISSEURS.md)（法语）。
 
 ## 安全
 
@@ -148,7 +164,7 @@ QAF 的出发点很简单：**智能体总有一天会被操纵。** 它读网�
 ### QAF 不承诺的事
 
 - **`sys-agent` 有网络**（经由 sys-firewall）：它读网页和文档。这是有意为之，因为它本来就被当作“受影响”：任何 N2 及以上的操作都会先问你。
-- **你的请求会发送给模型的服务商，除非你选择本地 AI。** 使用订阅或 API 密钥时，你的请求和智能体读到的内容都会经过 Anthropic（或其他服务商）的服务器。你也可以运行本地模型：Claude Code 可以指向兼容的服务器（`ANTHROPIC_BASE_URL` 变量，例如 Ollama，或 LiteLLM 这类中转），放在另一个 qube 或你自己的另一台机器上，这样你的请求就不会离开你的设备。隐私更好，但本地模型通常能力较弱，而且项目尚未测试这种搭配。选择权在你：QAF 的安全不依赖于模型，无论用哪个模型，Doorman 都执行同样的规则。
+- **你的请求会发送给模型的服务商，除非你选择本地 AI。** 使用订阅或 API 密钥时，你的请求和智能体读到的内容都会经过 Anthropic（或其他服务商）的服务器。你也可以在智能体卡片中选择本地 AI：填写网络地址，指向你自己机器上兼容 Anthropic 的服务器（Ollama、LM Studio……），也可以放在另一个 qube 中，这样你的请求就不会离开你的设备。隐私更好，但本地模型通常能力较弱，而且这条路径尚未经过端到端测试。选择权在你：QAF 的安全不依赖于模型，无论用哪个模型，Doorman 都执行同样的规则。
 - **可以免除确认**，由你决定（`qaf-suspendre 15m|1h|1j|permanent`，类似 Omarchy 的免密码 sudo）。免确认期间，本需确认的操作不弹窗直接通过，并记入日志；**N4 仍然拒绝**，而紧急暂停优先。不属于 root 或可被他人修改的免确认文件会被忽略。
 - **没有做过外部审计。** 唯一的安全审查是项目自己做的。
 
@@ -193,12 +209,12 @@ QAF 是一个**原型**，始于 2026/10/25，只在**一台机器**（Lenovo Le
 - Qubes 的无回归检查，在 Doorman 运行、暂停和停止三种状态下；
 - 一条命令完成安装，适用于正常安装的 Qubes 4.3。
 
-**测试**：2 800 多个自动化测试（2026/10/29 通过 2 848 个），运行在模拟的 Qubes 后端上。其中有注入测试套件：被操纵的智能体可能伪造的每一个计划，结局都是被拒绝或进入 dom0 的确认窗口，绝不会被直接执行。
+**测试**：3 200 多个自动化测试（2026/11/01 通过 3 277 个），运行在模拟的 Qubes 后端上。其中有注入测试套件：被操纵的智能体可能伪造的每一个计划，结局都是被拒绝或进入 dom0 的确认窗口，绝不会被直接执行。
 
 **尚未完成：**
 
 - 没有正式发布的版本，也没有签名的 RPM 包：只有一个归档和它的指纹，需要手动校验；
-- 只有一个智能体（Claude Code）；Codex 等已在计划中；
+- 只有一个投入使用的智能体（Claude Code）：除了一次 OpenRouter 真实测试外，卡片中的其他服务商都没有用真实账号使用过；
 - 安装模板仍需你自己用 Qubes 的工具完成（N4）；
 - 只在一台机器上试过：换一台机器，可能会遇到意外；
 - 没有外部审计。

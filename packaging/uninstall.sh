@@ -19,7 +19,8 @@ UI_UTIL=$(sed -n 's|^d /run/qaf-ui [0-7]* \([a-z_][a-z0-9_-]*\) qaf-exec.*|\1|p'
     "$R/etc/tmpfiles.d/qaf-ui.conf" 2>/dev/null | head -n 1 || true)
 
 echo "== Politique d'abord : plus aucun appel qaf.Plan accepté"
-rm -f "$R/etc/qubes/policy.d/00-qaf.policy" "$R/etc/qubes/policy.d/00-qaf.policy.tmp" \
+rm -f "$R/etc/qubes/policy.d/00-qaf-0-voisin.policy" "$R/etc/qubes/policy.d/00-qaf-0-voisin.policy.tmp" \
+    "$R/etc/qubes/policy.d/00-qaf.policy" "$R/etc/qubes/policy.d/00-qaf.policy.tmp" \
     "$R/etc/qubes/policy.d/00-qaf-agent-long.policy" "$R/etc/qubes/policy.d/00-qaf-agent-long.policy.tmp" \
     "$R/etc/qubes/policy.d/30-qaf-usage.policy" "$R/etc/qubes/policy.d/30-qaf-usage.policy.tmp"
 rm -f "$R/etc/qubes-rpc/qaf.Plan"
@@ -74,7 +75,7 @@ fi
 rm -f "$LECTURE" "$LECTURE.tmp"
 
 rm -rf "$R/usr/lib/qaf" "$R/usr/libexec/qaf"
-rm -f "$R/usr/bin/qaf-pause" "$R/usr/bin/qaf-suspendre" "$R/usr/bin/qaf-suspension" "$R/usr/bin/qaf-agent-panneau" "$R/usr/bin/qaf-update" "$R/usr/bin/qaf-palette"
+rm -f "$R/usr/bin/qaf-pause" "$R/usr/bin/qaf-suspendre" "$R/usr/bin/qaf-voisin" "$R/usr/bin/qaf-suspension" "$R/usr/bin/qaf-agent-panneau" "$R/usr/bin/qaf-update" "$R/usr/bin/qaf-palette"
 rm -f "$R/usr/bin/qaf-agent" "$R/usr/share/applications/qaf-agent.desktop"
 rm -f "$R/usr/share/qaf/LICENCES-TIERS"  # notice des icônes Lucide
 rmdir "$R/usr/share/qaf" 2>/dev/null || true

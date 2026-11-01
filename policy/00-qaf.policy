@@ -6,8 +6,9 @@
 ## load_policy_dirs) : préfixe 00 pour passer avant tout fichier livré par
 ## Qubes. install.sh refuse d'installer si un fichier trié avant celui-ci
 ## parle de sys-agent, qaf-agent, d'un jetable dispN, de @anyvm, @dispvm,
-## @tag:, @type: ou contient un !include (seule exception : notre propre
-## 00-qaf-agent-long.policy, identique à celui du dépôt).
+## @tag:, @type: ou contient un !include (exceptions : notre propre
+## 00-qaf-agent-long.policy, identique à celui du dépôt, et
+## 00-qaf-0-voisin.policy, une ligne de forme exacte posée par qaf-voisin).
 ##
 ## Agent jetable (docs/AGENT-JETABLE.md §5.2) : chaque demande de la palette
 ## lance un agent neuf dans un jetable de qaf-agent-dvm, que l'exécuteur

@@ -19,7 +19,8 @@ dossier_systeme() {
     for d in "$@"; do [ -d "$d" ] || install -d -m 0755 "$d"; done
 }
 LONG=00-qaf-agent-long.policy  # agent permanent (sys-agent, D28), seulement si portier.json dit agent_long
-USAGE_POL=30-qaf-usage.policy  # panneau de l'agent (qaf.Usage, qaf.Console, qaf.Connexion), posé avec $LONG
+VOISIN=00-qaf-0-voisin.policy  # qube voisin : écrit par qaf-voisin, jamais livré (qaf_ui/voisin.py)
+USAGE_POL=30-qaf-usage.policy  # panneau de l'agent (qaf.Usage, qaf.Console, qaf.Connexion, qaf.Fournisseur), posé avec $LONG
 
 if [ -z "$R" ]; then
     [ "$(id -u)" = 0 ] || { echo "À lancer en root (sudo)." >&2; exit 1; }
@@ -31,10 +32,37 @@ fi
 # Un fichier trié avant $POL qui parle de sys-agent, des jetables de l'agent
 # (qaf-agent, étiquette ou modèle, ou un jetable dispN précis) ou d'un groupe
 # qui peut les inclure passerait avant notre liste blanche ; un $POL dans /run
-# la remplacerait. Dans ces cas on n'installe rien. Seule exception : notre
-# $LONG, identique à celui du dépôt (AGENT-JETABLE §5.2, §11). Contrôle fait à
-# l'installation ; qaf-installer --verifier le refait.
+# la remplacerait. Dans ces cas on n'installe rien. Deux exceptions : notre
+# $LONG, identique à celui du dépôt (AGENT-JETABLE §5.2, §11), et $VOISIN de forme
+# exacte (voisin_valide). Contrôle fait à l'installation ; qaf-installer --verifier
+# le refait.
 MOTIF_AVANT='sys-agent|qaf-agent|disp[0-9]|@anyvm|@dispvm|@tag:|@type:|^[[:space:]]*!include'
+# Seul fichier de l'utilisateur admis avant $POL : l'autorisation d'un qube voisin
+# (qaf_ui/voisin.py, qaf-voisin, geste dans dom0). Dans /etc, une seule règle, de cette
+# forme exacte, ni lien symbolique : elle n'ouvre qu'un port d'un qube, à sys-agent seul.
+# Toute autre forme retombe sur le contrôle ordinaire : elle cite sys-agent, donc refus.
+voisin_valide() {
+    local l n=0 c="" LC_ALL=C
+    local re='^qubes\.ConnectTCP \+([1-9][0-9]{0,4}) sys-agent @default allow target=([a-zA-Z][a-zA-Z0-9_.-]{0,30})$'
+    [ ! -L "$1" ] || return 1
+    # qrexec coupe aussi sur le retour chariot et autres fins de ligne : rien d'autre que l'ASCII imprimable.
+    [ "$(LC_ALL=C tr -d '\n -~' < "$1" | wc -c)" = 0 ] || return 1
+    while IFS= read -r l || [ -n "$l" ]; do
+        case "$l" in ''|\#*) continue ;; esac
+        [[ "$l" =~ $re ]] || return 1
+        [ "${BASH_REMATCH[1]}" -le 65535 ] || return 1
+        c=${BASH_REMATCH[2]}
+        case "$c" in dom0|sys-*|qaf-*|disp[0-9]*|vault) return 1 ;; esac
+        n=$((n + 1))
+    done < "$1"
+    [ "$n" = 1 ] || return 1
+    # Coffres et qubes réglés dans portier.json ($2) : mêmes listes que voisin.noms_interdits.
+    # Fichier absent ou illisible : refus.
+    [ -z "${2:-}" ] || python3 -I -c 'import json, sys
+r = json.load(open(sys.argv[1], encoding="utf-8"))
+cles = ("coffres", "systeme", "admin_qubes", "ne_jamais_demarrer", "coffres_entrables", "jetables")
+sys.exit(any(sys.argv[2] in r.get(k, []) for k in cles))' "$2" "$c" 2>/dev/null
+}
 verifier_ordre() {
     local d f nom bloque=0
     for d in "$R/run/qubes/policy.d" "$R/etc/qubes/policy.d"; do
@@ -47,6 +75,8 @@ verifier_ordre() {
                 bloque=1
             elif [ "$nom" = "$LONG" ] && [ "$d" = "$R/etc/qubes/policy.d" ] && cmp -s "$f" "$SRC/policy/$LONG"; then
                 :  # le nôtre, inchangé
+            elif [ "$nom" = "$VOISIN" ] && [ "$d" = "$R/etc/qubes/policy.d" ] && voisin_valide "$f" "$R/etc/qaf/portier.json"; then
+                :  # autorisation posée par l'utilisateur : gardée par la mise à jour
             elif [[ "$nom" < "$POL" ]] && grep -Ev '^[[:space:]]*(#|$)' "$f" | grep -Eq "$MOTIF_AVANT"; then
                 echo "  $f passe avant $POL et peut concerner l'agent (sys-agent ou ses jetables)" >&2
                 bloque=1
@@ -116,6 +146,8 @@ lanceur "$R/usr/libexec/qaf/qaf-ui" qaf_ui.serveur
 lanceur "$R/usr/bin/qaf-pause" qaf_gate.pause
 # Suspension des confirmations (« sudoless » d'Omarchy, 28/10) : root seulement.
 lanceur "$R/usr/bin/qaf-suspendre" qaf_ui.suspension
+# Autorisation d'un qube voisin (root, argv fixe) : même schéma, aucun droit pour l'agent.
+lanceur "$R/usr/bin/qaf-voisin" qaf_ui.voisin
 # Son icône dans la barre de Plasma (StatusNotifierItem, session de l'utilisateur ;
 # unité --user et autostart posés plus bas avec ceux de qaf-ui).
 lanceur "$R/usr/bin/qaf-suspension" qaf_ui.ecrans.suspension
@@ -251,6 +283,7 @@ if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("
     AGENT_LONG=1
 else
     AGENT_LONG=0
+    rm -f "$R/etc/qubes/policy.d/$VOISIN"  # sans liste blanche, cette règle n'a plus de cadre
 fi
 if [ "$AGENT_LONG" = 1 ]; then
     install -m 0644 "$SRC/policy/$LONG" "$R/etc/qubes/policy.d/$LONG.tmp"

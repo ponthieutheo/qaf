@@ -10,19 +10,27 @@ pour l'ancienne barre i3 et transposé ici à la zone de notification de Plasma
   trait dessous à la couleur du label de sys-agent (lu par qubesadmin),
   éclaircie jusqu'à 3:1 sur la barre comme pour tout qube. Arrêté : yeux fermés, encre atténuée (le trait reste entier) ;
   alerte (fenêtre la plus pleine à 90 % et plus) : pastille ATTENTION en haut
-  à droite. Infobulle : « Prêt · Claude : 34 % sur 5 heures ».
+  à droite (fenêtres de Claude, donc seulement si Claude est l'actif). Infobulle :
+  « Prêt · Claude : 34 % sur 5 heures », ou le fournisseur actif.
 - Clic gauche : la carte (fenêtre POPUP de dom0 sans décoration, au-dessus de
   l'icône, près du pointeur ; Échap ou clic dehors la ferment). Clic droit :
   la console de l'agent (terminal « Agent » de sys-agent). Clic du milieu :
   rafraîchir la mesure (jamais de démarrage de sys-agent pour une mesure).
 - Carte (§2, §3) : héros (tête 24, « Agent », ligne en capitales qui tourne
-  toutes les 2,8 s, boutons « + » et « >_ »), une section par abonnement avec
-  ses jauges (5 heures, semaine) et le temps avant remise à zéro, lien
-  « Journal de l'agent ». Pas de tuiles « LANCER UNE TÂCHE » (28/10 :
-  il n'en veut pas).
-- « + » : choix du fournisseur (Claude, Codex, Grok, comme Omarchy), puis un
-  terminal DANS sys-agent avec la CLI de connexion du fournisseur
-  (qaf.Connexion, D3).
+  toutes les 2,8 s, boutons « + » et « >_ »), le fournisseur actif coché (jauges
+  pour Claude, 5 heures et semaine, avec le temps avant remise à zéro), puis les
+  autres fournisseurs utilisables avec « Utiliser » toujours visible.
+  Pas de tuiles « LANCER UNE TÂCHE » (28/10 : il n'en veut pas).
+- « + » : les 35 fournisseurs d'Omarchy, liste à hauteur bornée, par section. Une
+  ligne activable bascule (qaf.Fournisseur) ; une autre ouvre le terminal de
+  l'assistant DANS sys-agent (qaf.Connexion, D3). Clés et adresses ne se saisissent
+  que là, jamais dans dom0.
+- « Autoriser un qube voisin » : écran de dom0, seul endroit où s'ouvre le passage vers
+  l'IA locale d'un autre qube (qaf_ui/voisin.py). Le qube vient de qubesd, le port du
+  clavier interne (P2), rien de qaf.Usage. La carte n'y est jamais reconstruite par le
+  tic de la mesure, sinon le champ s'effacerait sous la frappe.
+- Rien de ce qui s'affiche ne vient du qube : énumérations et ids de la table de
+  dom0 seulement ; modèle et adresse ne sont jamais montrés ici.
 - Données : qaf.Usage dans sys-agent, sans jamais le démarrer (qaf_ui/usage.py).
 
 Ce module-ci est sans GTK (tests/test_agent_panneau.py) ; l'icône et la carte
@@ -35,6 +43,7 @@ import sys
 
 from qaf_ui import i18n
 from qaf_ui import usage as u
+from qaf_ui import voisin as v
 from qaf_ui.i18n import t
 
 IDENT = "qaf-agent-panneau"
@@ -53,11 +62,26 @@ ECART_BLOCS = 16
 ECART_JAUGES = 12
 JAUGE = 4
 BOUTON = 32
-ECART_FOURNISSEURS = 10
-TITRE_JAUGE = round(CONTENU * 0.30)
+COLONNE = 36  # tête 24 + 12 : coche sous la tête, noms sous le mot « Agent »
+RETRAIT_COCHE = 4
+LIGNE = 32
+ICONE_LIGNE = 16
+ECART_CORPS = 8
+SECTION = 20
+LISTE_MAX = 324  # hauteur bornée du « + » : la dernière ligne visible est coupée, le défilement se voit
+AUTRES_MAX = 160  # carte normale : 5 lignes, puis défilement
+TITRE_JAUGE = 88
+DUREE = 56
+DUREE_ZH = 72  # « 2 小时 14 分 » déborde à 56 et les deux jauges n'auraient plus la même longueur
 AVANT_DUREE = 20
 TETE_HEROS = 24
 ECART_POINTEUR = 8  # entre la carte et la barre
+CARRE = 12  # carré de label d'un qube
+VOISINS_MAX = 160  # écran du qube voisin : 5 lignes, puis défilement
+PORT_EXEMPLE = "11434"  # indication seulement : le port est toujours tapé (P2)
+# Seules touches du champ de port, au nom Gdk : chiffres et déplacement, rien pour coller.
+TOUCHES_PORT = frozenset({*"0123456789", *(f"KP_{i}" for i in range(10)), "BackSpace", "Delete", "KP_Delete",
+                          "Left", "Right", "Home", "End", "KP_Left", "KP_Right", "Tab", "ISO_Left_Tab"})
 
 ROTATION_MS = 2800
 FONDU_SORTIE_MS = 150
@@ -66,19 +90,21 @@ SONDAGE_ETAT_S = 5
 MINUTERIE_DUREES_S = 30
 CONNEXION_SONDAGE_S = 5
 CONNEXION_MAX_S = 15 * 60
+# Une mesure partie avant que qaf.Connexion ait effacé le dernier résultat dirait encore
+# l'ancien : elle ne compte pas pendant ces quelques secondes.
+CONNEXION_MARGE_S = 5
 
-# Fournisseurs du « + » (la liste d'Omarchy) : (clé de qaf.Connexion, nom, commande).
-FOURNISSEURS = (
-    ("claude", "Claude", "claude auth login"),
-    ("codex", "Codex", "codex login"),
-    ("grok", "Grok", "grok login"),
-)
-NOMS = {cle: nom for cle, nom, _ in FOURNISSEURS}
+# Sections du « + », l'ordre de la table (Omarchy) restant celui de la lecture. « local » est
+# aujourd'hui une adresse réseau : sa section est le point d'extension pour tout autre lieu.
+SECTIONS = (("carte.abonnements", u.IDS[:15]), ("carte.autres_cli", u.IDS[15:27]), ("carte.cles_api", u.IDS[27:34]),
+            ("carte.sec_locale", u.IDS[34:]))
+AUTRES_CLI = u.IDS[15:27]
+CLES_API = u.IDS[27:34]
 
 # Textes de la carte (qaf_ui/langues), lus dans la langue de dom0 à chaque usage.
 __getattr__ = i18n.constantes({
-    "TITRE": "carte.titre", "INTRO_VIDE": "carte.intro_vide", "INTRO_AJOUT": "carte.intro_ajout",
-    "NON_INSTALLE": "carte.non_installe", "CONNECTE": "carte.connecte", "SANS_MESURE": "carte.sans_mesure",
+    "TITRE": "carte.titre", "INTRO_VIDE": "carte.intro_vide",
+    "NON_INSTALLE": "carte.non_installe", "CONNECTE": "carte.connecte",
     "ATTENTE": "carte.attente", "INCONNU": "carte.inconnu", "DEMARRER": "carte.demarrer",
     "ROUVRIR": "carte.rouvrir", "INFOBULLE_PLUS": "carte.infobulle_plus", "INFOBULLE_RETOUR": "carte.infobulle_retour",
     "INFOBULLE_CONSOLE": "carte.infobulle_console", "DEMARRAGE": "carte.demarrage", "USAGE": "carte.usage"})
@@ -90,12 +116,51 @@ ARGV_CONSOLE = ["qvm-run", "--quiet", "--service", u.AGENT, "qaf.Console"]
 
 
 def argv_connexion(fournisseur):
-    if fournisseur not in NOMS:
+    if fournisseur not in u.IDS:
         raise ValueError(f"fournisseur inconnu : {fournisseur}")
     return ["qvm-run", "--quiet", "--service", u.AGENT, f"qaf.Connexion+{fournisseur}"]
 
 
 ARGV_ETAT = ["qvm-check", "--quiet", "--running", u.AGENT]
+
+
+class EcranVoisin:
+    """État de l'écran « qube voisin », tenu hors des widgets. clavier : confirmation.Clavier
+    lu à l'ouverture ; qubes : None pendant la lecture, sinon liste, vide si rien ne convient,
+    False si illisible."""
+
+    def __init__(self, clavier, regle):
+        self.clavier, self.regle = clavier, regle
+        self.qubes, self.choix, self.port = None, None, ""
+        self.message, self.en_cours = "", False
+
+    def autorisable(self):
+        """Un qube choisi dans la liste de dom0 et un port tapé. Jamais si l'identité du clavier
+        interne manque : le champ est alors fermé."""
+        return (self.regle is None and not self.en_cours and self.clavier.ok and v.port_valide(self.port) is not None
+                and bool(self.qubes) and self.choix in {q.nom for q in self.qubes})
+
+    def qube(self, nom):
+        return next((q for q in self.qubes or () if q.nom == nom), None)
+
+    def vue(self):
+        """Ce qui reconstruit l'écran. Ni le port ni la mesure : le champ survit à la frappe."""
+        return self.qubes, self.choix, self.message, self.en_cours, self.regle
+
+
+def touche_du_port(nom):
+    return nom in TOUCHES_PORT
+
+
+def notes_voisin(mesure, regle, marche):
+    """Sous l'IA locale active quand un voisin est autorisé : sa santé n'est jamais sondée, le
+    tunnel réveillerait le qube (la mesure dit `inconnue`). dom0 dit l'état réel du qube."""
+    if regle is None or mesure is None or mesure.sante != "inconnue":
+        return ()
+    notes = [t("carte.note_sante_voisin")]
+    if marche is not None:
+        notes.append(t("carte.voisin_etat", qube=regle.qube, etat=t("carte.en_marche" if marche else "carte.eteint")))
+    return tuple(notes)
 
 
 def geste_du_clic(bouton):
@@ -104,27 +169,155 @@ def geste_du_clic(bouton):
 
 
 def etat_fournisseur(mesure, cle):
-    """« connecte », « deconnecte » ou « non_installe » ; Claude est toujours
-    installé (claude est la CLI de l'agent)."""
+    """« connecte », « deconnecte », « non_installe » ou « connexion_seule » ; Claude est
+    toujours installé (claude est la CLI de l'agent)."""
     if cle == "claude":
         if mesure is None:
             return "deconnecte"
         return "deconnecte" if mesure.etat == "sans_jeton" else "connecte"
-    return dict(mesure.fournisseurs).get(cle, "non_installe") if mesure is not None else "non_installe"
+    if mesure is None:
+        return "non_installe"
+    # Une clé ou une adresse ne s'installe pas : sans nouvelle de sys-agent (v2), reste à configurer.
+    sans_cli = mesure.v >= 2 and (cle in CLES_API or cle == "local")
+    return dict(mesure.fournisseurs).get(cle, "deconnecte" if sans_cli else "non_installe")
 
 
-def etat_carte(allume, derniere, statut, ajout=False, connexion=None):
-    """État de la carte : arrete, connexion, ajout, vide, attente ou mesure.
+def connectable(mesure, cle):
+    """Le terminal de connexion peut-il s'ouvrir pour ce fournisseur ? En v1, sys-agent ne
+    connaît que Claude, Codex et Grok, sans installation à la demande."""
+    if cle == "claude":
+        return True
+    if mesure is None:
+        return False
+    return mesure.v >= 2 or (cle in u.FOURNISSEURS_V1 and etat_fournisseur(mesure, cle) != "non_installe")
+
+
+def activable(mesure, cle):
+    """Peut-il devenir l'agent : connecté, et son serveur MCP qaf configuré (agents). grokbot
+    jamais, quoi que dise le qube."""
+    return (mesure is not None and cle not in u.JAMAIS_AGENT and cle in mesure.agents
+            and etat_fournisseur(mesure, cle) == "connecte")
+
+
+def statut_ligne(mesure, cle):
+    """Statut d'une ligne : actif, connecte, a_configurer, non_installe ou connexion_seule.
+    Connecté mais sans serveur MCP qaf = connexion seule, jamais un agent."""
+    e = etat_fournisseur(mesure, cle)
+    if u.actif_de(mesure) == cle and (cle != "claude" or e == "connecte"):
+        return "actif"
+    if e == "connecte":
+        return "connecte" if activable(mesure, cle) else "connexion_seule"
+    return {"deconnecte": "a_configurer"}.get(e, e)
+
+
+def geste_ligne(mesure, cle, allume):
+    """Effet d'un clic : basculer, terminal, ou None (désactivée). sys-agent arrêté : rien, le
+    terminal ne le démarrerait pas sans un geste exprès."""
+    if not allume:
+        return None
+    statut = statut_ligne(mesure, cle)
+    if statut == "actif":
+        return None
+    if statut == "connecte":
+        return "basculer"
+    return "terminal" if connectable(mesure, cle) else None
+
+
+def icone_terminal(mesure, cle, allume):
+    """L'icône du terminal n'apparaît que là où la ligne fait autre chose que l'ouvrir."""
+    return allume and connectable(mesure, cle) and statut_ligne(mesure, cle) in ("actif", "connecte")
+
+
+def utilisables(mesure):
+    """Carte normale : les fournisseurs qui peuvent devenir l'agent, sauf l'actif."""
+    return [cle for cle in u.IDS if cle != u.actif_de(mesure) and activable(mesure, cle)]
+
+
+def largeur_duree():
+    return DUREE_ZH if i18n.langue() == "zh" else DUREE
+
+
+def meta_fournisseur(mesure, cle, regle=None):
+    """Ce que l'on sait dire d'un fournisseur sans rien lire du qube. regle : l'autorisation
+    d'un qube voisin, lue par dom0 dans son propre fichier."""
+    if cle == "claude":
+        return u.OFFRES.get(mesure.offre, "") if mesure is not None else ""
+    if cle == "local":
+        return t("carte.reseau" if regle is None else "carte.qube_voisin")
+    return t("carte.cle_api" if cle in CLES_API else "carte.cli" if cle in AUTRES_CLI else "carte.abonnement")
+
+
+def note_actif(cle):
+    """Rappel permanent sous un fournisseur actif autre que Claude."""
+    if cle == "local":
+        return "carte.note_local"
+    return "carte.note_or" if cle in CLES_API else "carte.note_cli" if cle in AUTRES_CLI else "carte.note_abonnement"
+
+
+def notes_bascule(cle, console_ouverte):
+    """Clés des notes après une bascule. Une console ouverte garde son processus, sur l'ancien
+    fournisseur : elle n'est jamais fermée d'autorité, seulement signalée."""
+    notes = ["carte.note_bascule"]
+    if console_ouverte:
+        notes.append("carte.note_console")
+    if cle == "agy":
+        notes.append("carte.note_google")
+    return tuple(notes)
+
+
+def etapes_connexion(cle):
+    """Trois lignes constantes, sans coches vivantes : la mesure arrive au mieux toutes les 15 s
+    et aucun écran ne doit mentir pendant ce temps."""
+    if cle == "local":
+        milieu = "carte.et_lieu"
+    else:
+        milieu = "carte.et_cle" if cle in CLES_API else "carte.et_compte"
+    return ("carte.et_ouvert", milieu, "carte.et_test")
+
+
+def ecran_connexion(mesure):
+    """Résultat du dernier assistant : ok, echec, ou attente."""
+    r = mesure.connexion if mesure is not None else ""
+    return r or "attente"
+
+
+def connexion_finie_v1(mesure, cle, etat):
+    """sys-agent en v1 n'a pas de résultat d'assistant : l'écran se ferme quand la connexion se
+    voit. En v2, seul un résultat le fait passer, un fournisseur déjà connecté ne le ferme pas."""
+    return (mesure.v == 1 and etat_fournisseur(mesure, cle) == "connecte"
+            and (cle != "claude" or etat == "ok"))
+
+
+def connexion_retiree(mesure, cle, avant):
+    """Le fournisseur vient d'être retiré dans le terminal : aucun test n'a tourné, donc aucun
+    résultat n'arrivera. avant : les ids activables à l'ouverture du terminal."""
+    return (cle in avant and cle != "claude" and mesure.v >= 2 and not mesure.connexion
+            and cle not in mesure.agents)
+
+
+def titre_pret(cle):
+    return t("carte.pret_f" if cle == "local" else "carte.pret", nom=u.nom_fournisseur(cle))
+
+
+def phrase_pret(cle):
+    return t("carte.pret_local" if cle == "local" else "carte.pret_tiers")
+
+
+def etat_carte(allume, derniere, statut, ajout=False, connexion=None, voisin=False):
+    """État de la carte : voisin, arrete, connexion, ajout, vide, attente ou mesure.
     derniere : dernière Mesure gardée (avec ses fenêtres) ; statut : état de la
-    toute dernière réponse de qaf.Usage (None s'il n'y en a pas eu)."""
+    toute dernière réponse de qaf.Usage (None s'il n'y en a pas eu). L'écran du voisin passe
+    devant tout, et marche sys-agent éteint : retirer une autorisation ne dépend pas de lui."""
+    if voisin:
+        return "voisin"
     if connexion:
         return "connexion"
     if ajout:
         return "ajout"
     if not allume:
         return "arrete"
-    if statut == "sans_jeton":
-        return "vide"
+    if statut == "sans_jeton" and u.actif_de(derniere) in ("claude", None):
+        return "vide"  # un autre actif : sans compte Claude, la carte reste celle de cet actif
     if derniere is None and statut is None:
         return "attente"
     return "mesure"

@@ -20,6 +20,11 @@ remplacé dans le registre de dom0 (P1), ne couvrirait plus rien. Le jeton
 longue durée (~/.config/qaf/jeton-claude) reste une alternative à la connexion
 OAuth.
 
+Fournisseur actif (qaf_mcp/fournisseurs.py) : Claude par défaut, chemin ci-dessus
+inchangé. Sinon le lancement vient de la table : jamais de jeton Claude dans
+l'environnement d'un tiers, et --continue seulement dans la même famille de
+fournisseur ; après un changement, nouvelle conversation, l'ancienne reste sur disque.
+
 Agent jetable (mode inactif, agent_long faux) : le service tourne dans un
 jetable de qaf-agent-dvm que le Doorman vient de lancer pour cette demande.
 Dans un jetable :
@@ -55,6 +60,7 @@ import unicodedata
 
 from qaf_gate.schema import CLIS, TASK_INTERDITS, _REQUEST_RE
 
+from . import fournisseurs
 from .server import VARIABLE_DEMANDE
 
 MAX_ENTREE = 16 * 1024
@@ -120,26 +126,28 @@ def lire(donnees: bytes):
     return rid, texte, cli
 
 
-def commande_terminal(rid, texte, cli="claude", jetable=False, suite=False):
+def commande_terminal(rid, texte, cli="claude", jetable=False, suite=False, lancement=None):
     """argv du terminal : pas de shell, le texte est un seul argument après
     « -- » (il ne peut pas être pris pour une option du CLI). env pose
     QAF_REQUEST pour ce seul CLI (et son serveur MCP) ; --disable-server :
     un terminal neuf, pas un onglet d'un terminal déjà lancé avec un autre
     environnement, et qui ne rend la main qu'à sa fermeture. suite :
     --continue, la conversation de l'agent est reprise (n14 dans un jetable ;
-    dans sys-agent dès qu'une conversation existe, D28).
+    dans sys-agent dès qu'une conversation existe, D28). lancement : fournisseur
+    actif autre que Claude (fournisseurs.Lancement), son argv remplace celui du CLI.
     Titre fixe « Agent » (Qubes écrit « [dispNNNN] Agent ») : la demande reste
     dans le contenu de la console, jamais dans la barre de titre violette."""
+    agent = [*lancement.env, *lancement.argv] if lancement else \
+        [*ARGV_CLI[cli], *(("--continue",) if suite else ()), "--", texte]
     return [TERMINAL, "--disable-server", GEOMETRIE, f"--title={TITRE}", "-x", ENV,
-            f"{VARIABLE_DEMANDE}={rid}", *(ENV_JETABLE if jetable else ENV_SYS_AGENT), *ARGV_CLI[cli],
-            *(("--continue",) if suite else ()), "--", texte]
+            f"{VARIABLE_DEMANDE}={rid}", *(ENV_JETABLE if jetable else ENV_SYS_AGENT), *agent]
 
 
-def commande(rid, texte, cli="claude", jetable=False, verrou=None, suite=False):
+def commande(rid, texte, cli="claude", jetable=False, verrou=None, suite=False, lancement=None):
     """Ce que lance le service : le terminal, suivi dans un jetable de
     l'extinction au dernier terminal (APRES, n13, R-8). Sans fichier de
     verrou, pas d'extinction : les minuteries de dom0 s'en chargent."""
-    argv = commande_terminal(rid, texte, cli, jetable, suite)
+    argv = commande_terminal(rid, texte, cli, jetable, suite, lancement)
     return [SH, "-c", APRES, "qaf-agent", verrou, *argv] if jetable and verrou else argv
 
 
@@ -234,6 +242,19 @@ def dossier_de_travail(environ):
     return dossier if os.path.isdir(dossier) else maison
 
 
+def agent_choisi(maison, conversation, texte=None, chemin=None):
+    """(id, suite, lancement) du fournisseur actif ; lancement None : Claude, chemin
+    d'origine. Un fournisseur qui ne peut pas partir sans risque retombe sur Claude."""
+    choisi = fournisseurs.actif_effectif(maison)
+    if choisi != "claude":
+        suite = fournisseurs.reprise(maison, choisi, conversation)
+        try:
+            return choisi, suite, fournisseurs.lancement(choisi, maison, texte, suite, chemin)
+        except fournisseurs.Refus:
+            choisi = "claude"
+    return choisi, fournisseurs.reprise(maison, choisi, conversation), None
+
+
 def est_jetable(executer=subprocess.run):
     """Vrai dans un jetable (QubesDB /type = DispVM, écrit par dom0)."""
     try:
@@ -271,17 +292,24 @@ def main(entree=None, environ=None, lancer=subprocess.Popen, jetable=None, racin
     if j:
         env[VARIABLE_JETON] = j
     cwd, pid_terminal = dossier_de_travail(environ), None
+    maison, choisi, lanc = environ.get("HOME") or "/", "claude", None
     if jetable:
         verrou, suite = verrou_agents(racine_verrou)
     else:  # sys-agent (D28) : une seule fenêtre « Agent », conversation reprise
         verrou, pid_terminal = None, fichier_terminal(racine_verrou)
         if pid_terminal:
             fermer(pid_terminal)
-        suite = conversation_existe(environ, cwd)
+        choisi, suite, lanc = agent_choisi(maison, conversation_existe(environ, cwd), texte, environ.get("PATH"))
+        if lanc:
+            env = {k: v for k, v in env.items() if k not in lanc.retire}
+            if fournisseurs.PAR_ID[choisi].famille == "cli":
+                fournisseurs.ecrire_demande(maison, rid)  # lu par qaf_mcp/lanceur.py
     # Détaché : qrexec rend la main à dom0 tout de suite, le terminal reste.
-    p = lancer(commande(rid, texte, cli, jetable, verrou, suite), stdin=subprocess.DEVNULL,
+    p = lancer(commande(rid, texte, cli, jetable, verrou, suite, lanc), stdin=subprocess.DEVNULL,
                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, cwd=cwd, env=env)
     noter_terminal(pid_terminal, getattr(p, "pid", None))
+    if not jetable:
+        fournisseurs.noter_lancement(maison, choisi, time.time())
     print(f"ok {rid}")
     return 0
 

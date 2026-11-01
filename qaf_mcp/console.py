@@ -8,45 +8,44 @@ même fichier de pid : une seule fenêtre « Agent » à la fois, demande.py). S
 elle est ouverte, rien (dom0 l'amène devant) ; sinon un terminal avec claude,
 qui reprend la conversation de ~/agent s'il y en a une (--continue). Aucun
 texte n'est envoyé ni tapé : on écrit soi-même dans la console.
-qaf.Connexion+FOURNISSEUR : un terminal « Connexion » avec la CLI de connexion
-du fournisseur (claude auth login, codex login), qui reste ouvert jusqu'à
-Entrée pour qu'on lise le résultat.
+La console suit le fournisseur actif (qaf_mcp/fournisseurs.py) ; QAF_REQUEST en est
+retirée, et aucune valeur littérale n'est posée à sa place.
+qaf.Connexion+FOURNISSEUR : un terminal « Connexion » avec l'assistant du
+fournisseur (qaf_mcp/assistant.py), qui reste ouvert jusqu'à Entrée pour qu'on lise
+le résultat. Le résultat du dernier assistant est effacé avant d'ouvrir le terminal :
+un ancien échec ne s'affiche pas.
 
 qaf.Console n'accepte aucun argument ; celui de qaf.Connexion vient de qrexec
-(QREXEC_SERVICE_ARGUMENT, « qaf.Connexion+codex ») et doit être un fournisseur
-connu. L'appelant doit être dom0. Bibliothèque standard seulement.
+(QREXEC_SERVICE_ARGUMENT, « qaf.Connexion+codex ») et doit être un des 35 ids.
+L'appelant doit être dom0. Bibliothèque standard seulement.
 """
 
 import os
 import subprocess
 import sys
+import time
 
 from . import demande as d
+from . import fournisseurs
+from .fournisseurs_table import IDS, PAR_ID, PYTHON
 
-# Fournisseur -> (titre, CLI, arguments de connexion). Mêmes CLI qu'Omarchy
-# (omarchy-agent-account-add) ; la CLI absente du modèle est dite « non installée ».
-CONNEXIONS = {
-    "claude": ("Claude", d.CLAUDE, ("auth", "login")),
-    "codex": ("Codex", "/usr/bin/codex", ("login",)),
-    "grok": ("Grok", "/usr/bin/grok", ("login",)),
-}
+CONNEXIONS = IDS  # tous ; le terminal ouvre l'assistant du fournisseur
 TITRE_CONNEXION = "Connexion"
-# Le terminal de connexion attend Entrée à la fin (le résultat reste lisible).
-# "$@" : argv fixe de la CLI, jamais interprété par le shell.
-FIN_CONNEXION = ('"$@"; echo; printf "%s" "Terminé. Entrée pour fermer cette fenêtre."; read _')
+ASSISTANT = ('import sys; sys.path.insert(0, "/usr/lib/qaf"); from qaf_mcp.assistant import main; '
+             'sys.exit(main(sys.argv[1:]))')
 
 
-def commande_console(suite):
-    """argv du terminal « Agent » de la console : claude, --continue s'il y a
-    une conversation."""
+def commande_console(suite, lancement=None):
+    """argv du terminal « Agent » de la console : le CLI du fournisseur actif, --continue
+    s'il y a une conversation de la même famille."""
+    agent = [*lancement.env, *lancement.argv] if lancement else [d.CLAUDE, *(("--continue",) if suite else ())]
     return [d.TERMINAL, "--disable-server", d.GEOMETRIE, f"--title={d.TITRE}", "-x", d.ENV,
-            *d.ENV_SYS_AGENT, d.CLAUDE, *(("--continue",) if suite else ())]
+            *d.ENV_SYS_AGENT, *agent]
 
 
 def commande_connexion(fournisseur):
-    titre, cli, args = CONNEXIONS[fournisseur]
-    return [d.TERMINAL, "--disable-server", "--geometry=100x30", f"--title={TITRE_CONNEXION} {titre}",
-            "-x", d.SH, "-c", FIN_CONNEXION, "qaf-connexion", cli, *args]
+    return [d.TERMINAL, "--disable-server", "--geometry=100x30",
+            f"--title={TITRE_CONNEXION} {PAR_ID[fournisseur].nom}", "-x", PYTHON, "-I", "-c", ASSISTANT, fournisseur]
 
 
 def terminal_ouvert(fichier, proc="/proc"):
@@ -85,14 +84,20 @@ def console(environ=None, lancer=subprocess.Popen, racine=None, proc="/proc"):
     j = d.jeton(environ)
     if j:
         env[d.VARIABLE_JETON] = j
-    p = lancer(commande_console(d.conversation_existe(environ, cwd)), stdin=subprocess.DEVNULL,
+    maison = environ.get("HOME") or "/"
+    choisi, suite, lanc = d.agent_choisi(maison, d.conversation_existe(environ, cwd), None, environ.get("PATH"))
+    if lanc:
+        env = {k: v for k, v in env.items() if k not in lanc.retire}
+        fournisseurs.effacer_demande(maison)  # la console ne porte aucune demande
+    p = lancer(commande_console(suite, lanc), stdin=subprocess.DEVNULL,
                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, cwd=cwd, env=env)
     d.noter_terminal(fichier, getattr(p, "pid", None))
+    fournisseurs.noter_lancement(maison, choisi, time.time())
     print("ok")
     return 0
 
 
-def connexion(environ=None, lancer=subprocess.Popen, existe=os.path.exists):
+def connexion(environ=None, lancer=subprocess.Popen):
     environ = os.environ if environ is None else environ
     if not _appelant(environ, "qaf.Connexion"):
         return 1
@@ -100,9 +105,7 @@ def connexion(environ=None, lancer=subprocess.Popen, existe=os.path.exists):
     if f not in CONNEXIONS:
         print("refusé : fournisseur inconnu", file=sys.stderr)
         return 1
-    if not existe(CONNEXIONS[f][1]):
-        print("refusé : CLI non installée dans tpl-agent", file=sys.stderr)
-        return 2
+    fournisseurs.effacer_connexion(environ.get("HOME") or "/")
     env = {k: v for k, v in environ.items() if k not in (d.VARIABLE_JETON, "QAF_REQUEST")}
     lancer(commande_connexion(f), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
            stderr=subprocess.DEVNULL, start_new_session=True, cwd=environ.get("HOME") or "/", env=env)

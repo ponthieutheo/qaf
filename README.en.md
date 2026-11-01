@@ -22,6 +22,7 @@ The agent itself holds no rights. It lives locked inside its own qube, `sys-agen
 - [The idea](#the-idea)
 - [Screenshots](#screenshots)
 - [Architecture](#architecture)
+- [Agent providers](#agent-providers)
 - [Security](#security)
 - [Installation](#installation)
 - [Project status](#project-status)
@@ -69,11 +70,26 @@ The agent lives in its qube. It only talks to the Doorman, and only the Doorman 
 | `qaf_gate/` | dom0 | **The Doorman.** qrexec stub → validator → executor, plus two helpers (`qaf-gate-taches`, `qaf-gate-outils`). This is the trusted computing base (TCB). |
 | `qaf_mcp/` | sys-agent | MCP server: turns the agent's tools into typed plans sent with `qrexec-client-vm dom0 qaf.Plan`. Alongside it, the agent's **skills** (`qaf_mcp/skill/`): one base skill and seven focused ones (qubes, software, network, files and devices, upkeep, working inside a qube…) that teach it to go through the Doorman. |
 | `qaf_hand/` | target qubes | **The agent's hand**, with no LLM: per-window capture, keyboard and mouse (xdotool), execution. Called by dom0 only. |
-| `qaf_ui/` | dom0, graphical session | The desktop side of the agent: the confirmation window, the "Ask the agent" palette, the agent panel (`qaf-agent`), the Plasma panel icons (agent, suspension, qube icons). In French or English, following the dom0 locale. Outside the counted TCB. |
+| `qaf_ui/` | dom0, graphical session | The desktop side of the agent: the confirmation window, the "Ask the agent" palette, the agent panel (`qaf-agent`), the Plasma panel icons (agent, suspension, qube icons). In French, English or Simplified Chinese, following the dom0 locale. Outside the counted TCB. |
 | `policy/` | dom0 | Shipped qrexec policies (our own files, sorted before those of Qubes). |
 | `tools/qaf-installer` | dom0 | One command that turns a fresh Qubes 4.3 into QAF, and `--retour` to remove everything. |
 
-Today's agent is **Claude Code**, in a pinned version installed in the `tpl-agent` template. The contract (an MCP server and a skill) is designed for other CLIs too.
+The default agent is **Claude Code**, in a pinned version installed in the `tpl-agent` template. Only one agent runs at a time: the agent card picks it among 35 providers, the full list from Omarchy's panel and launcher, a CLI installed on demand in sys-agent, an API key or a local AI. QAF never starts them without approvals: a CLI that cannot ask stays sign-in only. Claude is the only one in service. OpenRouter completed a real plan with a real key. The 12 CLIs from the launcher have only run against a fake model, without an account: the state of each one is in [docs/FOURNISSEURS.md](docs/FOURNISSEURS.md) (in French).
+
+## Agent providers
+
+The agent card, in the panel, offers 35 providers: Omarchy's full list. You choose, only one agent runs at a time, and Claude Code stays the default. The Doorman applies the same rules to all of them.
+
+| Connection | Count | Providers |
+|---|---:|---|
+| CLI, installed on demand in sys-agent | 20 | Claude Code, Codex, Grok Build, Kimi Code, Cursor, GitHub Copilot, Muse Code, Google (Antigravity CLI), Kimchi, Hermes, Devin, Mistral Vibe, Qwen Code, OpenCode, Oh My Pi, Crush, OpenClaw, DeepSeek Harness, Kilo, Command Code |
+| API key | 7 | Z.ai, Ollama Cloud, MiniMax, OpenRouter, DeepSeek, Fireworks, Synthetic |
+| Local AI | 1 | Anthropic-compatible server (Ollama, LM Studio…) on a machine of yours or in another qube |
+| Sign-in only, cannot become the agent | 7 | Grok Bot, Pi, Ori, MiniMax Code, Kiro CLI, Freebuff, Amp |
+
+Sign-in only covers the CLIs whose approval step is missing or has not been observed: QAF never starts an agent in an approve-everything mode.
+
+**Level of proof.** Claude Code is the only one in service. OpenRouter completed a real plan with a real key. Most of the others have never been used with a real account: the details, provider by provider, are in [docs/FOURNISSEURS.md](docs/FOURNISSEURS.md) (in French).
 
 ## Security
 
@@ -148,7 +164,7 @@ And an emergency stop: `sudo qaf-pause` in dom0 makes every plan refused and sto
 ### What QAF does not promise
 
 - **`sys-agent` has network access** (through sys-firewall): it reads the Web and documentation. That is deliberate, since it is already treated as influenced: every N2-or-higher action will be put to you.
-- **Your requests go to the model provider, unless you choose a local AI.** With a subscription or an API key, what you ask and what the agent reads go through Anthropic's servers (or another provider's). You can also run a local model: Claude Code can target a compatible server (the `ANTHROPIC_BASE_URL` variable, for example Ollama or a relay such as LiteLLM), in another qube or on another machine of yours, and your requests no longer leave your hardware. More privacy, but a local model is usually less capable, and this setup is not tested by the project yet. It is your choice: QAF's security does not depend on the model, the Doorman applies the same rules whatever it is.
+- **Your requests go to the model provider, unless you choose a local AI.** With a subscription or an API key, what you ask and what the agent reads go through Anthropic's servers (or another provider's). You can also choose a local AI in the agent card: a network address pointing to an Anthropic-compatible server (Ollama, LM Studio…) on a machine of yours or in another qube, and your requests no longer leave your hardware. More privacy, but a local model is usually less capable, and this path is not tested end to end yet. It is your choice: QAF's security does not depend on the model, the Doorman applies the same rules whatever it is.
 - **Suspending confirmations is possible**, at your request (`qaf-suspendre 15m|1h|1j|permanent`, like Omarchy's passwordless sudo). While suspended, whatever would be confirmed goes through without a window and is logged; **N4 stays refused** and the pause takes precedence. A suspension file not owned by root, or writable by others, is ignored.
 - **No external audit** has been done. The only security reviews are the project's own.
 
@@ -193,12 +209,12 @@ QAF is a **prototype**, started on 25/10/2026, developed and tried on **a single
 - the Qubes non-regression check, with the Doorman running, paused and stopped;
 - the one-command installation, on a normally installed Qubes 4.3.
 
-**Tests**: more than 2,800 automated tests (2,848 passing as of 29 October 2026), on a simulated Qubes backend. Among them, the injection suite: every plan a manipulated agent could forge ends up refused or in a dom0 window, never carried out on its own.
+**Tests**: more than 3,200 automated tests (3,277 passing as of 1 November 2026), on a simulated Qubes backend. Among them, the injection suite: every plan a manipulated agent could forge ends up refused or in a dom0 window, never carried out on its own.
 
 **Not there yet:**
 
 - no published release or signed RPM package: an archive and its fingerprint, checked by hand;
-- a single agent (Claude Code); Codex and others are planned;
+- a single agent in service (Claude Code): apart from one real OpenRouter trial, no other provider in the card has been used with a real account;
 - installing a template is still up to you, with the Qubes tool (N4);
 - a single machine tried: expect surprises on another one;
 - no external audit.
@@ -211,7 +227,7 @@ Public address: <https://github.com/ponthieutheo/qaf> (`git clone https://github
 qaf_gate/    the Doorman (dom0, TCB)
 qaf_mcp/     the agent's MCP server (sys-agent)
 qaf_hand/    the service in target qubes
-qaf_ui/      the desktop side of the agent: confirmation, palette, agent panel (dom0), French and English
+qaf_ui/      the desktop side of the agent: confirmation, palette, agent panel (dom0), French, English and Chinese
 policy/      qrexec policies
 packaging/   systemd units, accounts, Doorman step of qaf-installer
 profil/      security settings applied by the installer

@@ -81,10 +81,10 @@ def test_politique_du_panneau_de_l_agent():
     assert USAGE.name > POLITIQUE.name and USAGE.name < "90"
     r = [tuple(l.split()) for l in USAGE.read_text(encoding="utf-8").splitlines()
          if l.strip() and not l.lstrip().startswith("#")]
-    services = ("qaf.Usage", "qaf.Connexion", "qaf.Console")
+    services = ("qaf.Usage", "qaf.Connexion", "qaf.Console", "qaf.Fournisseur")
     assert {x for x in r if x[4] == "allow"} == {(s, "*", "@adminvm", "sys-agent", "allow") for s in services}
     assert {x for x in r if x[4] == "deny"} == {(s, "*", "@anyvm", "@anyvm", "deny") for s in services}
-    assert len(r) == 6 and not any("@tag:" in " ".join(x) for x in r)
+    assert len(r) == 8 and not any("@tag:" in " ".join(x) for x in r)
 
 
 def test_nom_trie_en_tete():

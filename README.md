@@ -22,6 +22,7 @@ L'agent, lui, n'a aucun droit. Il vit enfermé dans son propre qube, `sys-agent`
 - [L'idée](#lidée)
 - [En images](#en-images)
 - [Architecture](#architecture)
+- [Fournisseurs de l'agent](#fournisseurs-de-lagent)
 - [Sécurité](#sécurité)
 - [Installation](#installation)
 - [État du projet](#état-du-projet)
@@ -69,11 +70,26 @@ L'agent vit dans son qube. Il ne parle qu'au Doorman, qui seul parle à qubesd.
 | `qaf_gate/` | dom0 | **Le Doorman.** Talon qrexec → validateur → exécuteur, plus deux auxiliaires (`qaf-gate-taches`, `qaf-gate-outils`). C'est la base de confiance (TCB). |
 | `qaf_mcp/` | sys-agent | Serveur MCP : traduit les outils de l'agent en plans typés envoyés par `qrexec-client-vm dom0 qaf.Plan`. Avec lui, les **skills** de l'agent (`qaf_mcp/skill/`) : une skill de base et sept skills ciblées (qubes, logiciels, réseau, fichiers et périphériques, entretien, travail dans un qube…) qui lui apprennent à passer par le Doorman. |
 | `qaf_hand/` | qubes cibles | **La main** de l'agent, sans LLM : capture fenêtre par fenêtre, clavier et souris (xdotool), exécution. Appelé par dom0 seulement. |
-| `qaf_ui/` | dom0, session graphique | La brique agent côté bureau : fenêtre de confirmation, palette « Demander à l'agent », panneau de l'agent (`qaf-agent`), icônes de la barre de Plasma (agent, suspension, icônes des qubes). En français ou en anglais, selon la locale de dom0. Hors TCB compté. |
+| `qaf_ui/` | dom0, session graphique | La brique agent côté bureau : fenêtre de confirmation, palette « Demander à l'agent », panneau de l'agent (`qaf-agent`), icônes de la barre de Plasma (agent, suspension, icônes des qubes). En français, en anglais ou en chinois simplifié, selon la locale de dom0. Hors TCB compté. |
 | `policy/` | dom0 | Politiques qrexec livrées (fichiers à nous, triés avant ceux de Qubes). |
 | `tools/qaf-installer` | dom0 | Une commande qui fait d'un Qubes 4.3 neuf un QAF, et `--retour` qui retire tout. |
 
-L'agent du moment est **Claude Code**, dans une version épinglée installée dans le modèle `tpl-agent`. Le contrat (un serveur MCP et une skill) est prévu pour d'autres CLI.
+L'agent par défaut est **Claude Code**, dans une version épinglée installée dans le modèle `tpl-agent`. Il n'y a qu'un agent à la fois : la carte de l'agent le choisit parmi 35 fournisseurs, la liste complète du panneau et du lanceur d'Omarchy, CLI installée à la demande dans sys-agent, clé d'API ou IA locale. QAF ne les lance jamais sans validation : une CLI qui ne sait pas demander reste en connexion seule. Claude est le seul en service. OpenRouter a fait aboutir un vrai plan avec une vraie clé. Les 12 CLI venues du lanceur n'ont tourné que contre un faux modèle, sans compte : l'état de chacun est dans [docs/FOURNISSEURS.md](docs/FOURNISSEURS.md).
+
+## Fournisseurs de l'agent
+
+La carte de l'agent, dans la barre, propose 35 fournisseurs : la liste complète d'Omarchy. Tu choisis, un seul agent tourne à la fois, et Claude Code reste le choix par défaut. Le Doorman applique les mêmes règles à tous.
+
+| Connexion | Nombre | Fournisseurs |
+|---|---:|---|
+| CLI, installée à la demande dans sys-agent | 20 | Claude Code, Codex, Grok Build, Kimi Code, Cursor, GitHub Copilot, Muse Code, Google (Antigravity CLI), Kimchi, Hermes, Devin, Mistral Vibe, Qwen Code, OpenCode, Oh My Pi, Crush, OpenClaw, DeepSeek Harness, Kilo, Command Code |
+| Clé d'API | 7 | Z.ai, Ollama Cloud, MiniMax, OpenRouter, DeepSeek, Fireworks, Synthetic |
+| IA locale | 1 | Serveur compatible Anthropic (Ollama, LM Studio…) sur un poste à toi ou dans un autre qube |
+| Connexion seule, ne peut pas devenir l'agent | 7 | Grok Bot, Pi, Ori, MiniMax Code, Kiro CLI, Freebuff, Amp |
+
+La connexion seule concerne les CLI dont la validation est absente ou n'a pas été vue : QAF ne lance aucun agent en mode « tout passe ».
+
+**Niveau de preuve.** Claude Code est le seul en service. OpenRouter a fait aboutir un vrai plan avec une vraie clé. La plupart des autres n'ont jamais servi avec un vrai compte : le détail, fournisseur par fournisseur, est dans [docs/FOURNISSEURS.md](docs/FOURNISSEURS.md).
 
 ## Sécurité
 
@@ -148,7 +164,7 @@ Et un arrêt d'urgence : `sudo qaf-pause` dans dom0 fait refuser tout plan et ar
 ### Ce que QAF ne promet pas
 
 - **`sys-agent` a le réseau** (par sys-firewall) : il lit le Web et la documentation. C'est assumé, puisqu'il est déjà traité comme influencé : toute action N2 ou plus te sera demandée.
-- **Tes demandes partent chez le fournisseur du modèle, sauf si tu choisis une IA locale.** Avec un abonnement ou une clé d'API, ce que tu demandes et ce que l'agent lit passent par les serveurs d'Anthropic (ou d'un autre fournisseur). Tu peux aussi faire tourner un modèle local : Claude Code sait viser un serveur compatible (variable `ANTHROPIC_BASE_URL`, par exemple Ollama ou un relais comme LiteLLM), dans un autre qube ou sur un autre poste à toi, et tes demandes ne quittent plus ta machine. Plus de confidentialité, mais un modèle local est en général moins capable, et ce montage n'est pas encore testé par le projet. C'est ton choix : la sécurité de QAF ne dépend pas du modèle, le Doorman applique les mêmes règles quel qu'il soit.
+- **Tes demandes partent chez le fournisseur du modèle, sauf si tu choisis une IA locale.** Avec un abonnement ou une clé d'API, ce que tu demandes et ce que l'agent lit passent par les serveurs d'Anthropic (ou d'un autre fournisseur). Tu peux aussi choisir une IA locale dans la carte de l'agent : une adresse réseau vers un serveur compatible Anthropic (Ollama, LM Studio…) sur un poste à toi ou dans un autre qube, et tes demandes ne sortent plus de chez toi. Plus de confidentialité, mais un modèle local est en général moins capable, et cette voie n'est pas encore testée de bout en bout. C'est ton choix : la sécurité de QAF ne dépend pas du modèle, le Doorman applique les mêmes règles quel qu'il soit.
 - **Suspendre les confirmations est possible**, à ta demande (`qaf-suspendre 15m|1h|1j|permanent`, comme le sudo sans mot de passe d'Omarchy). Pendant la suspension, ce qui serait confirmé passe sans fenêtre, noté au journal ; **N4 reste refusé** et la pause l'emporte. Un fichier de suspension qui n'appartient pas à root, ou modifiable par d'autres, est ignoré.
 - **Aucun audit externe** n'a été fait. Les seules revues de sécurité sont celles du projet.
 
@@ -193,12 +209,12 @@ QAF est un **prototype**, commencé le 25/10/2026, développé et essayé sur **
 - le contrôle de non-régression de Qubes, Doorman en marche, en pause et arrêté ;
 - l'installation en une commande, sur un Qubes 4.3 installé normalement.
 
-**Tests** : plus de 2 800 tests automatisés (2 848 réussis au 29/10/2026), sur un backend Qubes simulé. Parmi eux, la suite des injections : chaque plan qu'un agent manipulé pourrait forger finit refusé ou dans une fenêtre de dom0, jamais exécuté d'office.
+**Tests** : plus de 3 200 tests automatisés (3 277 réussis au 01/11/2026), sur un backend Qubes simulé. Parmi eux, la suite des injections : chaque plan qu'un agent manipulé pourrait forger finit refusé ou dans une fenêtre de dom0, jamais exécuté d'office.
 
 **Pas encore là :**
 
 - pas de version publiée ni de paquet RPM signé : une archive et son empreinte, vérifiée à la main ;
-- un seul agent (Claude Code) ; Codex et d'autres sont prévus ;
+- un seul agent en service (Claude Code) : hors un essai réel d'OpenRouter, aucun autre fournisseur de la carte n'a servi avec un vrai compte ;
 - l'installation d'un modèle reste à faire toi-même, avec l'outil de Qubes (N4) ;
 - une seule machine essayée : sur une autre, attends-toi à des surprises ;
 - aucun audit externe.
@@ -211,7 +227,7 @@ Adresse publique : <https://github.com/ponthieutheo/qaf> (`git clone https://git
 qaf_gate/    le Doorman (dom0, TCB)
 qaf_mcp/     serveur MCP de l'agent (sys-agent)
 qaf_hand/    service des qubes cibles
-qaf_ui/      brique agent du bureau : confirmation, palette, panneau de l'agent (dom0), en français et en anglais
+qaf_ui/      brique agent du bureau : confirmation, palette, panneau de l'agent (dom0), en français, en anglais et en chinois
 policy/      politiques qrexec
 packaging/   unités systemd, comptes, étape Doorman de qaf-installer
 profil/      réglages de sécurité posés par l'installateur

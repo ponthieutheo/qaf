@@ -68,6 +68,7 @@ CREES="qaf-agent-dvm qaf-dvm tpl-qaf-hand sys-agent tpl-agent"   # ordre de supp
 MODELE_AGENT=qaf-agent-dvm
 # Fichier trié avant 00-qaf.policy qui pourrait concerner l'agent (= install.sh).
 MOTIF_AVANT='sys-agent|qaf-agent|disp[0-9]|@anyvm|@dispvm|@tag:|@type:|^[[:space:]]*!include'
+VOISIN=00-qaf-0-voisin.policy  # qube voisin : écrit par qaf-voisin, jamais livré (= install.sh)
 
 MODE=installer EXT=0 PURGE=0 MATERIEL=0 ARCHIVE="" ATTENDU="" EXT_ARCHIVE="" ATTENDU_EXT=""
 usage() {
@@ -596,6 +597,10 @@ verifier_agent() {
                 verifier_agent_long "$f" || bloque=1
                 continue
             fi
+            if [ "$nom" = "$VOISIN" ] && [ "$d" = "$R/etc/qubes/policy.d" ] && voisin_valide "$f" "$PORTIER"; then
+                verifier_voisin "$f" || bloque=1
+                continue
+            fi
             if [[ "$nom" < 00-qaf.policy ]] && grep -Ev '^[[:space:]]*(#|$)' "$f" | grep -Eq "$MOTIF_AVANT"; then
                 ko "politique $f triée avant 00-qaf.policy et qui peut concerner l'agent"; bloque=1
             fi
@@ -642,6 +647,44 @@ verifier_agent() {
     if [ -n "$q" ]; then ko "étiquette qaf-agent sur un qube qui n'est pas un jetable de $MODELE_AGENT : $q"
     else ok "étiquette qaf-agent portée seulement par des jetables de $MODELE_AGENT"; fi
     nv "contenu du volume privé de $MODELE_AGENT (le lire démarrerait le modèle : contrôlé par setup-agent-dvm.sh)"
+}
+
+# Seul fichier de l'utilisateur admis avant 00-qaf.policy : l'autorisation d'un qube voisin
+# (qaf_ui/voisin.py, qaf-voisin, geste dans dom0). Dans /etc, une seule règle, de cette
+# forme exacte, ni lien symbolique : elle n'ouvre qu'un port d'un qube, à sys-agent seul.
+# Toute autre forme retombe sur le contrôle ordinaire : elle cite sys-agent, donc refus.
+voisin_valide() {
+    local l n=0 c="" LC_ALL=C
+    local re='^qubes\.ConnectTCP \+([1-9][0-9]{0,4}) sys-agent @default allow target=([a-zA-Z][a-zA-Z0-9_.-]{0,30})$'
+    [ ! -L "$1" ] || return 1
+    # qrexec coupe aussi sur le retour chariot et autres fins de ligne : rien d'autre que l'ASCII imprimable.
+    [ "$(LC_ALL=C tr -d '\n -~' < "$1" | wc -c)" = 0 ] || return 1
+    while IFS= read -r l || [ -n "$l" ]; do
+        case "$l" in ''|\#*) continue ;; esac
+        [[ "$l" =~ $re ]] || return 1
+        [ "${BASH_REMATCH[1]}" -le 65535 ] || return 1
+        c=${BASH_REMATCH[2]}
+        case "$c" in dom0|sys-*|qaf-*|disp[0-9]*|vault) return 1 ;; esac
+        n=$((n + 1))
+    done < "$1"
+    [ "$n" = 1 ] || return 1
+    # Coffres et qubes réglés dans portier.json ($2) : mêmes listes que voisin.noms_interdits.
+    # Fichier absent ou illisible : refus.
+    [ -z "${2:-}" ] || python3 -I -c 'import json, sys
+r = json.load(open(sys.argv[1], encoding="utf-8"))
+cles = ("coffres", "systeme", "admin_qubes", "ne_jamais_demarrer", "coffres_entrables", "jetables")
+sys.exit(any(sys.argv[2] in r.get(k, []) for k in cles))' "$2" "$c" 2>/dev/null
+}
+
+# Autorisation valide : seulement avec l'agent permanent, dont elle complète la liste blanche.
+verifier_voisin() {
+    if existe python3 && [ -f "$PORTIER" ] && python3 -c \
+            'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("agent_long") is True else 1)' \
+            "$PORTIER" 2>/dev/null; then
+        dire "  info     qube voisin autorisé : $(grep -v '^#' "$1")"
+        return 0
+    fi
+    ko "$1 présent alors que portier.json ne dit pas agent_long"; return 1
 }
 
 # 00-qaf-agent-long.policy : identique à celui du dépôt, et seulement si

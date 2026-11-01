@@ -60,7 +60,7 @@ def test_pluriels_chinois_identiques():
 
 # Chaînes chinoises sans idéogramme : noms propres, touches et unités, identiques partout.
 ZH_SANS_IDEOGRAMME = {"agent.doorman", "pal.touche_echap", "pal.touche_entree", "conf.fw.dns", "usage.milliard",
-                      "pal.ligne_agent", "etat.debut_demande"}
+                      "pal.ligne_agent", "etat.debut_demande", "usage.icone.fournisseur"}
 CJK = re.compile(r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")  # id\u00e9ogrammes et ponctuation chinoise
 
 

@@ -1,7 +1,7 @@
 ## QAF — panneau de l'agent long (sys-agent), installé dans
 ## /etc/qubes/policy.d/30-qaf-usage.policy AVEC 00-qaf-agent-long.policy (seulement
 ## si /etc/qaf/portier.json dit "agent_long": true), retiré avec lui.
-## Mesure d'usage, console et connexion de l'agent : appelées par dom0 seulement
+## Mesure d'usage, console, connexion et choix du fournisseur : appelés par dom0 seulement
 ## (docs/AGENT-PANNEAU.md §5.2, §7.2). Un appel parti de dom0 ne consulte pas la
 ## politique (qvm-run --service) : les allow le disent, les deny interdisent à
 ## tout qube d'appeler ces services ailleurs.
@@ -9,6 +9,8 @@
 qaf.Usage     *  @adminvm  sys-agent  allow
 qaf.Connexion *  @adminvm  sys-agent  allow
 qaf.Console   *  @adminvm  sys-agent  allow
+qaf.Fournisseur *  @adminvm  sys-agent  allow
 qaf.Usage     *  @anyvm    @anyvm     deny
 qaf.Connexion *  @anyvm    @anyvm     deny
 qaf.Console   *  @anyvm    @anyvm     deny
+qaf.Fournisseur *  @anyvm    @anyvm     deny

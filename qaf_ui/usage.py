@@ -11,6 +11,12 @@ influencé en permanence : tout ce qu'il rend peut être faux. D'où :
   est une constante d'ici, choisie d'après eux ;
 - aucune décision ne s'appuie sur la mesure (ni plan, ni confirmation, ni
   pause) : elle ne sert qu'à l'affichage (D2).
+
+Deux versions du schéma sont lues : v=1 (sys-agent pas encore mis à jour, clés
+codex et grok exactement) et v=2 (fournisseurs de la table IDS, plus actif,
+sante, connexion, agents). Le cache écrit en v=1 reste lisible. La bascule de
+fournisseur (qaf.Fournisseur) est un geste de l'utilisateur, pas une décision
+fondée sur la mesure : elle ne fait que transmettre un id de la table de dom0.
 """
 
 import json
@@ -26,6 +32,8 @@ MAX_OCTETS = 4096
 DELAI_S = 20
 ARGV_USAGE = ["qvm-run", "--pass-io", "--no-gui", "--no-autostart", "--service", AGENT, "qaf.Usage"]
 ARGV_DEMARRER = ["qvm-start", AGENT]
+DELAI_BASCULE_S = 5
+MAX_REPONSE_BASCULE = 16
 
 ETATS = ("ok", "sans_jeton", "en_pause", "expire", "refuse", "limite", "injoignable", "erreur")
 OFFRES = {"": "", "pro": "Pro", "max_5x": "Max 5x", "max_20x": "Max 20x", "team": "Team",
@@ -38,9 +46,35 @@ MODELES = {"opus": "Opus", "sonnet": "Sonnet", "haiku": "Haiku", "fable": "Fable
 MODELES_TOTAUX = {"": "", "autre": "usage.autres_modeles", **{k: v for k, v in MODELES.items()}}
 JOURS = ("usage.jour.lundi", "usage.jour.mardi", "usage.jour.mercredi", "usage.jour.jeudi", "usage.jour.vendredi", "usage.jour.samedi",
          "usage.jour.dimanche")
-FOURNISSEURS = ("codex", "grok")
-ETATS_FOURNISSEUR = ("connecte", "deconnecte", "non_installe")
-CLES = {"v", "etat", "offre", "fenetres", "totaux", "fournisseurs"}
+# Les 35 fournisseurs, ceux du plugin agents d'Omarchy dans son ordre, avec après ses CLI les
+# 12 que seul son lanceur connaît : table de dom0, écrite à part de celle de sys-agent (qaf_mcp/fournisseurs_table.py, jamais importée ici) ; un test
+# croisé vérifie l'égalité des deux listes.
+IDS = ("claude", "codex", "grok", "kimi", "cursor", "grokbot", "copilot", "muse", "agy", "kimchi", "hermes",
+       "devin", "vibe", "qwen", "opencode", "pi", "omp", "ori", "crush", "openclaw", "dsh", "mcode", "kiro-cli",
+       "freebuff", "kilo", "amp", "commandcode", "zai", "ollama", "minimax", "openrouter", "deepseek", "fireworks",
+       "synthetic", "local")
+FOURNISSEURS = IDS[1:]
+FOURNISSEURS_V1 = ("codex", "grok")
+# grokbot : une limite d'usage d'un compte Cursor, aucun Doorman au milieu. Les trois autres :
+# CLI sans validation prouvée, que QAF ne lance jamais comme agent.
+JAMAIS_AGENT = ("grokbot", "pi", "ori", "mcode", "kiro-cli", "freebuff", "amp")
+# Noms propres de dom0, jamais lus dans le qube ; « local » est traduit (nom_fournisseur).
+NOMS = {"claude": "Claude", "codex": "Codex", "grok": "Grok", "kimi": "Kimi", "cursor": "Cursor",
+        "grokbot": "Grok Bot", "copilot": "Copilot", "muse": "Muse", "agy": "Google", "kimchi": "Kimchi",
+        "hermes": "Hermes", "devin": "Devin", "vibe": "Mistral Vibe", "qwen": "Qwen", "opencode": "OpenCode",
+        "pi": "Pi", "omp": "Oh My Pi", "ori": "Ori", "crush": "Crush", "openclaw": "OpenClaw",
+        "dsh": "DeepSeek Harness", "mcode": "MiniMax Code", "kiro-cli": "Kiro CLI", "freebuff": "Freebuff",
+        "kilo": "Kilo", "amp": "Amp", "commandcode": "Command Code",
+        "zai": "Z.ai", "ollama": "Ollama Cloud", "minimax": "MiniMax", "openrouter": "OpenRouter",
+        "deepseek": "DeepSeek", "fireworks": "Fireworks", "synthetic": "Synthetic"}
+ETATS_FOURNISSEUR_V1 = ("connecte", "deconnecte", "non_installe")
+ETATS_FOURNISSEUR = ETATS_FOURNISSEUR_V1 + ("connexion_seule",)
+SANTES = ("ok", "injoignable", "cle_refusee", "credit_epuise", "inconnue")
+SANTES_TEXTES = {"injoignable": "carte.sante_injoignable", "cle_refusee": "carte.sante_cle",
+                 "credit_epuise": "carte.sante_credit"}
+CONNEXIONS = ("ok", "echec", "")
+CLES_V1 = {"v", "etat", "offre", "fenetres", "totaux", "fournisseurs"}
+CLES = CLES_V1 | {"actif", "sante", "connexion", "agents"}
 CLES_FENETRE = {"nom", "modele", "pourcent", "remise"}
 CLES_TOTAUX = {"jetons_jour", "jetons_semaine", "invites_jour", "sessions_jour", "modele", "jour_actif", "partiel"}
 MAX_JETONS = 10 ** 12
@@ -81,7 +115,12 @@ class Mesure:
     offre: str
     fenetres: tuple
     totaux: Totaux | None
-    fournisseurs: tuple  # ((nom, état), …) dans l'ordre de FOURNISSEURS, ou ()
+    fournisseurs: tuple  # ((id, état), …) dans l'ordre de IDS, ou ()
+    v: int = 1
+    actif: str = "claude"     # v1, ou clé absente : Claude, seul agent possible
+    sante: str = "inconnue"
+    connexion: str = ""       # résultat du dernier assistant : ok, echec, "" (aucun)
+    agents: tuple = ()        # ids activables, dans l'ordre de IDS
 
 
 def _entier(x, bas, haut):
@@ -104,9 +143,10 @@ def lire_mesure(octets, maintenant=None):
 
 
 def _valider(b, maintenant):
-    if not isinstance(b, dict) or not {"v", "etat"} <= set(b) <= CLES:
+    if not isinstance(b, dict) or not _entier(b.get("v"), 1, 2):
         return None
-    if not _entier(b["v"], 1, 1) or b["etat"] not in ETATS:
+    v = b["v"]
+    if not {"v", "etat"} <= set(b) <= (CLES_V1 if v == 1 else CLES) or b["etat"] not in ETATS:
         return None
     offre = b.get("offre", "")
     if not isinstance(offre, str) or offre not in OFFRES:
@@ -148,24 +188,124 @@ def _valider(b, maintenant):
     fournisseurs = ()
     if "fournisseurs" in b:
         f = b["fournisseurs"]
-        if not isinstance(f, dict) or set(f) != set(FOURNISSEURS):
+        if not isinstance(f, dict):
             return None
-        if not all(isinstance(f[k], str) and f[k] in ETATS_FOURNISSEUR for k in FOURNISSEURS):
+        if v == 1 and set(f) != set(FOURNISSEURS_V1):
+            return None  # v1 : exactement codex et grok
+        if not set(f) <= set(FOURNISSEURS):
             return None
-        fournisseurs = tuple((k, f[k]) for k in FOURNISSEURS)
-    return Mesure(b["etat"], offre, tuple(fenetres), totaux, fournisseurs)
+        permis = ETATS_FOURNISSEUR_V1 if v == 1 else ETATS_FOURNISSEUR
+        if not all(isinstance(x, str) and x in permis for x in f.values()):
+            return None
+        fournisseurs = tuple((k, f[k]) for k in IDS if k in f)
+    if v == 1:
+        return Mesure(b["etat"], offre, tuple(fenetres), totaux, fournisseurs)
+    actif = b.get("actif", "claude")
+    if not isinstance(actif, str) or actif not in IDS or actif in JAMAIS_AGENT:
+        return None
+    sante = b.get("sante", "inconnue")
+    connexion = b.get("connexion", "")
+    if not isinstance(sante, str) or sante not in SANTES:
+        return None
+    if not isinstance(connexion, str) or connexion not in CONNEXIONS:
+        return None
+    agents = b.get("agents", [])
+    if not isinstance(agents, list) or len(agents) > len(IDS):
+        return None
+    if not all(isinstance(a, str) and a in IDS and a not in JAMAIS_AGENT for a in agents):
+        return None
+    if len(set(agents)) != len(agents):
+        return None
+    return Mesure(b["etat"], offre, tuple(fenetres), totaux, fournisseurs, 2, actif, sante, connexion,
+                  tuple(k for k in IDS if k in agents))
 
 
 def vers_dict(m):
     """Mesure -> dict au format de qaf.Usage (pour le cache)."""
-    d = {"v": 1, "etat": m.etat, "offre": m.offre,
+    d = {"v": m.v, "etat": m.etat, "offre": m.offre,
          "fenetres": [{"nom": f.nom, "modele": f.modele, "pourcent": f.pourcent, "remise": f.remise}
                       for f in m.fenetres]}
     if m.totaux is not None:
         d["totaux"] = {k: getattr(m.totaux, k) for k in CLES_TOTAUX}
     if m.fournisseurs:
         d["fournisseurs"] = dict(m.fournisseurs)
+    if m.v >= 2:
+        d.update(actif=m.actif, sante=m.sante, connexion=m.connexion, agents=list(m.agents))
     return d
+
+
+# --- fournisseurs (dom0 ne connaît que sa table) -------------------------------------------
+
+def nom_fournisseur(cle):
+    return t("carte.ia_locale") if cle == "local" else NOMS[cle]
+
+
+def actif_de(m):
+    """Fournisseur actif, None sans mesure : rien ne présume Claude avant d'avoir lu sys-agent."""
+    return None if m is None else m.actif
+
+
+def sante_affichee(m):
+    """Clé de texte du problème du fournisseur actif, ou None (ok, inconnue, sans mesure)."""
+    return None if m is None else SANTES_TEXTES.get(m.sante)
+
+
+def lire_borne(argv, limite, delai, ouvrir=None):
+    """(code, octets), en ne gardant jamais plus de limite + 1 octets : capture_output
+    garderait tout ce qu'écrit le qube avant la coupe. Au-delà, le processus est tué. Code
+    None : lancement impossible, ou délai dépassé."""
+    import subprocess
+    import threading
+    try:
+        p = (ouvrir or subprocess.Popen)(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                         stderr=subprocess.DEVNULL)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None, b""
+    sortie = []
+
+    def lire():
+        try:
+            sortie.append(p.stdout.read(limite + 1))
+        except (OSError, ValueError):
+            sortie.append(b"")
+
+    debut = time.monotonic()
+    fil = threading.Thread(target=lire, daemon=True)
+    fil.start()
+    fil.join(delai)
+    if fil.is_alive():
+        p.kill()
+        p.wait()
+        return None, b""
+    if len(sortie[0]) > limite:
+        p.kill()
+    try:
+        code = p.wait(timeout=max(0.1, delai - (time.monotonic() - debut)))
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+        return None, b""
+    p.stdout.close()
+    return code, sortie[0]
+
+
+def argv_bascule(cle):
+    """qaf.Fournisseur+ID, sans jamais démarrer sys-agent. Un id hors de la table de dom0, ou
+    qui ne peut pas être l'agent, ne part pas : l'argument qrexec vient d'ici seulement."""
+    if cle not in IDS or cle in JAMAIS_AGENT:
+        raise ValueError(f"fournisseur non activable : {cle}")
+    return ["qvm-run", "--pass-io", "--no-gui", "--no-autostart", "--service", AGENT, f"qaf.Fournisseur+{cle}"]
+
+
+def basculer(cle, ouvrir=None, delai=DELAI_BASCULE_S):
+    """Demande à sys-agent de changer d'actif. Vrai seulement sur le code 0 et la ligne « ok ».
+    Bloquant : hors du fil GTK."""
+    try:
+        argv = argv_bascule(cle)
+    except ValueError:
+        return False
+    code, octets = lire_borne(argv, MAX_REPONSE_BASCULE, delai, ouvrir)
+    return code == 0 and octets.strip() == b"ok"
 
 
 # --- mise en forme (textes de dom0) ------------------------------------------------------
@@ -234,6 +374,9 @@ def fenetre_liante(m, maintenant):
 
 
 def alarme(m, maintenant):
+    """Les fenêtres mesurées sont celles de Claude : pas d'alarme s'il n'est pas l'actif."""
+    if actif_de(m) not in ("claude", None):
+        return False
     f = fenetre_liante(m, maintenant)
     return f is not None and pourcent_affiche(f, maintenant) >= ALARME
 
@@ -256,6 +399,9 @@ def phrases_heros(m, allume, etat_carte=None):
         return [t("usage.heros.connecter")]
     if etat_carte == "ajout":
         return [t("usage.heros.ajouter")]
+    if actif_de(m) not in ("claude", None):
+        # Les totaux sont ceux de Claude : ils ne diraient rien de l'actif.
+        return [t("usage.heros.fournisseur", nom=nom_fournisseur(m.actif).upper())]
     tot = None if m is None else m.totaux
     if tot is None or tot.jetons_semaine == 0:
         return [t("usage.heros.abonnement")]
@@ -291,8 +437,13 @@ def infobulle_icone(allume, m, maintenant):
     """(titre, texte) de l'infobulle de l'icône dans la barre."""
     if not allume:
         return (t("usage.icone.arrete"), t("usage.icone.gestes"))
-    f = fenetre_liante(m, maintenant)
     texte = t("usage.icone.pret")
+    if actif_de(m) not in ("claude", None):
+        texte += t("usage.icone.fournisseur", nom=nom_fournisseur(m.actif))
+        if sante_affichee(m):
+            texte += " · " + t(sante_affichee(m))
+        return (t("usage.icone.titre"), texte + "\n" + t("usage.icone.gestes"))
+    f = fenetre_liante(m, maintenant)
     if f is not None:
         texte += t("usage.icone.claude", pc=pourcent_affiche(f, maintenant), fenetre=t(LIMITES[f.nom]))
     elif m is not None and m.etat == "sans_jeton":
@@ -359,13 +510,7 @@ def cache_lire(chemin=None):
     return (m, heure) if m is not None else (None, None)
 
 
-def appeler(executer=None, delai=DELAI_S):
+def appeler(ouvrir=None, delai=DELAI_S):
     """Lance qaf.Usage (argv fixe) et rend (code, octets bornés). Bloquant :
     hors du fil GTK. Code None : qvm-run absent ou délai dépassé."""
-    import subprocess
-    executer = executer or subprocess.run
-    try:
-        r = executer(ARGV_USAGE, stdin=subprocess.DEVNULL, capture_output=True, timeout=delai)
-    except (OSError, subprocess.SubprocessError):
-        return None, b""
-    return r.returncode, (r.stdout or b"")[:MAX_OCTETS + 1]
+    return lire_borne(ARGV_USAGE, MAX_OCTETS, delai, ouvrir)

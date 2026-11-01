@@ -23,8 +23,13 @@ fermé (qaf_ui/usage.py) : ce qui suit n'est qu'une politesse.
   est gardée dans ~/.cache/qaf-usage/limites.json (notre qube, perdu = refait).
 - Totaux locaux : transcriptions ~/.claude/projects/**/*.jsonl modifiées
   depuis 8 jours, 64 Mio et 5 s au plus (au-delà : « partiel »).
-- Fournisseurs de la carte « + » : Codex et Grok, installés ou non,
-  connectés ou non (présence de leur auth.json, jamais lu).
+  Les tours passés par un autre fournisseur ne comptent pas, même avec un modèle
+  « claude-… » (OpenRouter) : ils ne touchent pas l'abonnement.
+- Fournisseurs (v=2) : état des 34 ids hors Claude, fournisseur actif (absent =
+  Claude), sante du fournisseur actif (sonde de 2 s au plus), connexion (résultat du
+  dernier assistant), agents (ids activables). Rien que des ids et des énumérations
+  (qaf_mcp/fournisseurs.py) : ni modèle, ni adresse, ni clé. Aucune jauge hors celle
+  de Claude ; le crédit d'OpenRouter ne se voit que par sante.
 
 Bibliothèque standard seulement. Lancé par /etc/qubes-rpc/qaf.Usage.
 """
@@ -38,6 +43,8 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
+
+from . import fournisseurs as table
 
 URL = "https://api.anthropic.com/api/oauth/usage"
 ENTETES = {"anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"}
@@ -58,8 +65,6 @@ CACHE = (".cache", "qaf-usage", "limites.json")
 ETATS = ("ok", "sans_jeton", "en_pause", "expire", "refuse", "limite", "injoignable", "erreur")
 OFFRES = ("", "pro", "max_5x", "max_20x", "team", "team_5x", "enterprise")
 MODELES = ("opus", "sonnet", "haiku", "fable")
-CLIS = {"codex": (("/usr/bin/codex",), (".codex", "auth.json")),
-        "grok": (("/usr/bin/grok", "~/.grok/bin/grok"), (".grok", "auth.json"))}
 MAX_JETONS = 10 ** 12
 MAX_COMPTE = 100_000
 
@@ -265,6 +270,7 @@ def totaux(maison, maintenant, horloge=time.monotonic):
     jetons_jour = invites = 0
     sessions = set()
     lus, partiel, debut = 0, False, horloge()
+    periodes = table.periodes_tiers(maison)
     for _m, p in fichiers:
         if lus >= MAX_OCTETS or horloge() - debut > MAX_CALCUL_S:
             partiel = True
@@ -291,7 +297,7 @@ def totaux(maison, maintenant, horloge=time.monotonic):
                 if t is None:
                     continue
                 jour = datetime.fromtimestamp(t).date()
-                if jour < lundi or jour > aujourdhui:
+                if jour < lundi or jour > aujourdhui or table.tour_tiers(periodes, t):
                     continue
                 msg = e.get("message") if isinstance(e.get("message"), dict) else {}
                 if e.get("type") == "assistant":
@@ -343,11 +349,7 @@ def invite(e, msg):
 # --- fournisseurs de la carte « + » ------------------------------------------------------
 
 def fournisseurs(maison, existe=os.path.exists):
-    out = {}
-    for nom, (binaires, auth) in CLIS.items():
-        installe = any(existe(b.replace("~", maison, 1)) for b in binaires)
-        out[nom] = ("connecte" if existe(_chemin(maison, auth)) else "deconnecte") if installe else "non_installe"
-    return out
+    return table.etats(maison, existe)
 
 
 # --- sortie ----------------------------------------------------------------------
@@ -355,20 +357,26 @@ def fournisseurs(maison, existe=os.path.exists):
 def mesurer(maison, maintenant=None, ouvrir=None, horloge=time.monotonic, existe=os.path.exists):
     maintenant = time.time() if maintenant is None else maintenant
     etat, offre, f = limites(maison, maintenant, ouvrir)
-    sortie = {"v": 1, "etat": etat, "offre": offre if offre in OFFRES else "",
+    sortie = {"v": 2, "etat": etat, "offre": offre if offre in OFFRES else "",
               "fenetres": f if etat in ("ok", "limite") else []}
     try:
         sortie["totaux"] = totaux(maison, maintenant, horloge)
     except (OSError, ValueError, OverflowError):
         pass
     sortie["fournisseurs"] = fournisseurs(maison, existe)
+    actif = table.actif_effectif(maison, existe)
+    if actif != "claude":
+        sortie["actif"] = actif
+    sortie["sante"] = table.sante(actif, maison, ouvrir)
+    sortie["connexion"] = table.lire_connexion(maison)
+    sortie["agents"] = table.agents(maison, existe)
     return sortie
 
 
 def ligne(sortie):
     texte = json.dumps(sortie, separators=(",", ":"), ensure_ascii=True)
     if len(texte) + 1 > MAX_SORTIE:
-        texte = '{"v":1,"etat":"erreur"}'
+        texte = '{"v":2,"etat":"erreur"}'
     return texte + "\n"
 
 
@@ -381,7 +389,7 @@ def main(environ=None, sortie=None):
     try:
         resultat = mesurer(environ.get("HOME") or os.path.expanduser("~"))
     except Exception:  # jamais de trace (elle pourrait citer un fichier) : erreur fermée
-        resultat = {"v": 1, "etat": "erreur"}
+        resultat = {"v": 2, "etat": "erreur"}
     sortie.write(ligne(resultat))
     sortie.flush()
     return 0

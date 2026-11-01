@@ -82,8 +82,12 @@ qvm-run -u root --pass-io --no-gui tpl-agent "set -e
 
 # 2. Serveur MCP qaf (+ schéma et contrat du Doorman) dans /usr/lib/qaf du modèle,
 #    et les services qrexec de l'agent : qaf.Request (demandes de la palette),
-#    qaf.Usage, qaf.Console et qaf.Connexion (panneau de l'agent de la barre de
-#    Plasma, docs/AGENT-PANNEAU.md ; appelés par dom0 seulement).
+#    qaf.Usage, qaf.Console, qaf.Connexion et qaf.Fournisseur (panneau de l'agent
+#    de la barre de Plasma, docs/AGENT-PANNEAU.md ; appelés par dom0 seulement).
+#    Les autres fournisseurs n'ajoutent rien ici : leurs CLI s'installent à la
+#    demande dans ~/.local de sys-agent (qaf_mcp/fournisseurs_table.py).
+#    /etc/skel/.mcp.json : résidu d'un ancien serveur, hérité par tout nouveau qube
+#    de ce modèle ; QAF n'y pose rien, il est retiré.
 MCP="qaf_mcp qaf_gate/__init__.py qaf_gate/schema.py qaf_gate/proto.py"
 rm -rf /tmp/qafmcp && mkdir /tmp/qafmcp
 tar -xzf "$QAF_ARCHIVE" -C /tmp/qafmcp --no-same-owner qaf/qaf_mcp qaf/qaf_gate/__init__.py \
@@ -94,7 +98,7 @@ rm -rf /tmp/qafmcp
 # Une seule ligne : qubes.VMShell lit la commande sur stdin ligne par ligne,
 # tar avalerait les lignes suivantes avant l'archive.
 qvm-run -u root --pass-io --no-gui tpl-agent \
-  'rm -rf /usr/lib/qaf && mkdir -p /usr/lib/qaf && tar -C /usr/lib/qaf -xz && E=/usr/lib/qaf/qaf_mcp/etc && install -m 0755 $E/qubes-rpc/qaf.Request /etc/qubes-rpc/qaf.Request && install -D -m 0644 $E/qubes/rpc-config/qaf.Request /etc/qubes/rpc-config/qaf.Request && for s in qaf.Usage qaf.Console qaf.Connexion; do install -m 0755 $E/qubes-rpc/$s /etc/qubes-rpc/$s; done && for s in qaf.Console qaf.Connexion; do install -D -m 0644 $E/qubes/rpc-config/$s /etc/qubes/rpc-config/$s; done' < /tmp/qafmcp.tgz
+  'rm -rf /usr/lib/qaf && mkdir -p /usr/lib/qaf && tar -C /usr/lib/qaf -xz && E=/usr/lib/qaf/qaf_mcp/etc && install -m 0755 $E/qubes-rpc/qaf.Request /etc/qubes-rpc/qaf.Request && install -D -m 0644 $E/qubes/rpc-config/qaf.Request /etc/qubes/rpc-config/qaf.Request && for s in qaf.Usage qaf.Console qaf.Connexion qaf.Fournisseur; do install -m 0755 $E/qubes-rpc/$s /etc/qubes-rpc/$s; done && for s in qaf.Console qaf.Connexion; do install -D -m 0644 $E/qubes/rpc-config/$s /etc/qubes/rpc-config/$s; done && rm -f /etc/skel/.mcp.json' < /tmp/qafmcp.tgz
 qvm-shutdown --wait tpl-agent
 
 # 3. sys-agent : aucun droit admin.* (politique 00-qaf.policy), pas de jetable

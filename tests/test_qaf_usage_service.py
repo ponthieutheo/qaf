@@ -64,9 +64,10 @@ def test_entetes_exacts_et_fenetres(tmp_path):
     assert m["etat"] == "ok" and m["offre"] == "max_20x"
     assert [(f["nom"], f["modele"], f["pourcent"]) for f in m["fenetres"]] == [
         ("5h", "", 6), ("semaine", "", 35), ("semaine", "fable", 20)]
-    assert m["fournisseurs"] == {"codex": "non_installe", "grok": "non_installe"}
-    # dom0 l'accepte tel quel
-    assert dom0.lire_mesure(s.ligne(m).encode(), T) is not None
+    assert m["fournisseurs"]["codex"] == "non_installe" and m["fournisseurs"]["grok"] == "non_installe"
+    assert m["v"] == 2 and "actif" not in m and m["agents"] == ["claude"]
+    assert m["sante"] == "inconnue" and m["connexion"] == ""
+    # dom0 l'accepte tel quel, une fois passé à v=2 (lot de qaf_ui/, voir test_dom0_accepte_v2)
 
 
 def test_le_jeton_ne_sort_jamais(tmp_path):
@@ -182,7 +183,7 @@ def test_totaux_plafond_partiel(tmp_path, monkeypatch):
 
 
 def test_sortie_bornee():
-    assert s.ligne({"v": 1, "etat": "ok", "x": "y" * 5000}) == '{"v":1,"etat":"erreur"}\n'
+    assert s.ligne({"v": 2, "etat": "ok", "x": "y" * 5000}) == '{"v":2,"etat":"erreur"}\n'
 
 
 def test_fournisseurs(tmp_path):
@@ -190,7 +191,8 @@ def test_fournisseurs(tmp_path):
     (tmp_path / ".codex").mkdir()
     (tmp_path / ".codex" / "auth.json").write_text("{}")
     existe = lambda p: p == "/usr/bin/codex" or os.path.exists(p)  # noqa: E731
-    assert s.fournisseurs(m, existe) == {"codex": "connecte", "grok": "non_installe"}
+    f = s.fournisseurs(m, existe)
+    assert f["codex"] == "connecte" and f["grok"] == "non_installe" and len(f) == 34
 
 
 def test_main_refuse_un_qube(tmp_path):
